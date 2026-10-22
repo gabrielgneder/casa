@@ -6,17 +6,21 @@
 const CFG = window.CASA_CONFIG || {};
 const SCOPES = "openid email https://www.googleapis.com/auth/spreadsheets";
 const API = "https://sheets.googleapis.com/v4/spreadsheets/";
-const DEMO = new URLSearchParams(location.search).has("demo") && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+// ?demo = modo de teste com dados inventados (demo-ficticio.json); no computador usa demo-grid.json se existir.
+// Nada vai para o Google e tudo fica guardado separado do app de verdade (casa-demo.*).
+const DEMO = new URLSearchParams(location.search).has("demo");
+const LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const num = v => (typeof v === "number" && isFinite(v) ? v : 0);
 const brl = v => num(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const PREFIX = DEMO ? "casa-demo." : "casa.";
 const store = {
-  get(k) { try { return JSON.parse(localStorage.getItem("casa." + k)); } catch (e) { return null; } },
-  set(k, v) { try { localStorage.setItem("casa." + k, JSON.stringify(v)); } catch (e) {} },
-  del(k) { try { localStorage.removeItem("casa." + k); } catch (e) {} },
+  get(k) { try { return JSON.parse(localStorage.getItem(PREFIX + k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(PREFIX + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(PREFIX + k); } catch (e) {} },
 };
 
 /* ======================= datas (número de série da planilha) ======================= */
@@ -54,6 +58,8 @@ function brand(name) {
   for (const [re, c1, c2, fg] of BRANDS) if (re.test(n)) return { c1, c2, fg, bg: `linear-gradient(135deg, ${c1}, ${c2})` };
   return { c1: "#8fa39b", c2: "#5b6f67", fg: "#fff", bg: "linear-gradient(135deg, #8fa39b, #5b6f67)" };
 }
+// Para comparar textos da planilha: sem acento, espaços juntados, tudo maiúsculo ("  Cartões " = "CARTOES").
+const norm = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
 const titleCase = s => String(s || "").toLowerCase().replace(/(^|[\s(–-])([a-zà-ú])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bC\/c\b/i, "C/C");
 
 /* ======================= login do Google (redirecionamento) ======================= */
@@ -137,63 +143,70 @@ function parse(g) {
   const h = (r, c) => { const row = g.helper[r - 1]; const x = row ? row[c] : undefined; return x === undefined || x === null ? "" : x; };
   const n = g.main.length;
   const A = r => String(v(r, 1)).trim();
-  const find = (test, from = 1) => { for (let r = from; r <= n; r++) if (test(A(r))) return r; return -1; };
+  // Os títulos são comparados sem acento, sem espaço sobrando e sem diferença de maiúscula
+  // ("  Cartões " acha "CARTÕES"). titulo() = título exato; comeca() = começo do título.
+  const find = (test, from = 1) => { for (let r = from; r <= n; r++) if (test(norm(v(r, 1)))) return r; return -1; };
+  const titulo = t => x => x === norm(t), comeca = t => x => x.startsWith(norm(t));
   const need = (r, what) => { if (r < 0) throw new Error("A planilha mudou e o app não achou: " + what); return r; };
+  // valores digitados na planilha que o app compara: voltam para a grafia que o app usa
+  const SAIDE = ["1º DINHEIRO", "2º DINHEIRO", "NO CARTÃO"];
+  const saideOf = x => SAIDE.find(k => norm(k) === norm(x)) || String(x).trim();
+  const parcOf = x => (norm(x) === "FIXO" ? "FIXO" : x);
 
   const months = g.tab.filter(r => r[0]).map(r => ({ label: String(r[0]), serial: r[1], idx: Number(r[2]), nome: String(r[3] || "") }));
   const m = { months, mes: String(v(2, 2)).trim() };
-  m.cur = months.find(x => x.label === m.mes) || null;
+  m.cur = months.find(x => norm(x.label) === norm(m.mes)) || null;
 
   // entradas
-  const rEnt = need(find(t => t === "ENTRADAS"), "ENTRADAS");
-  const rTotEnt = need(find(t => t.startsWith("TOTAL QUE ENTROU"), rEnt), "TOTAL QUE ENTROU");
+  const rEnt = need(find(titulo("ENTRADAS")), "ENTRADAS");
+  const rTotEnt = need(find(comeca("TOTAL QUE ENTROU"), rEnt), "TOTAL QUE ENTROU");
   m.entradas = [];
   for (let r = rEnt + 1; r < rTotEnt; r++) m.entradas.push({ row: r, nome: A(r), data: v(r, 2), valor: v(r, 3), principal: r - rEnt <= 2 });
   m.totalEntrou = v(rTotEnt, 3);
 
   // faturas do mês
-  const rFat = need(find(t => t === "FATURAS DOS CARTÕES"), "FATURAS DOS CARTÕES");
+  const rFat = need(find(titulo("FATURAS DOS CARTÕES")), "FATURAS DOS CARTÕES");
   m.faturas = [];
-  for (let r = rFat + 1; A(r).startsWith("C. "); r++)
-    m.faturas.push({ row: r, nome: A(r).slice(3), venc: v(r, 2), valor: v(r, 3), previsto: v(r, 4), saide: String(v(r, 5)), onde: String(v(r, 6)) });
+  for (let r = rFat + 1; /^C\.\s*\S/.test(norm(v(r, 1))); r++)
+    m.faturas.push({ row: r, nome: A(r).replace(/^C\.\s*/i, ""), venc: v(r, 2), valor: v(r, 3), previsto: v(r, 4), saide: saideOf(v(r, 5)), onde: String(v(r, 6)) });
 
   // contas fixas
-  const rFix = need(find(t => t === "CONTAS FIXAS"), "CONTAS FIXAS");
-  const rTotFix = need(find(t => t === "TOTAL CONTAS FIXAS", rFix), "TOTAL CONTAS FIXAS");
+  const rFix = need(find(titulo("CONTAS FIXAS")), "CONTAS FIXAS");
+  const rTotFix = need(find(titulo("TOTAL CONTAS FIXAS"), rFix), "TOTAL CONTAS FIXAS");
   m.fixas = [];
   for (let r = rFix + 1; r < rTotFix; r++)
-    m.fixas.push({ row: r, nome: A(r), dia: v(r, 2), valor: v(r, 3), saide: String(v(r, 5)), onde: String(v(r, 6)) });
+    m.fixas.push({ row: r, nome: A(r), dia: v(r, 2), valor: v(r, 3), saide: saideOf(v(r, 5)), onde: String(v(r, 6)) });
   m.totalFixas = v(rTotFix, 3);
 
   // resultado
-  const rRes = need(find(t => t === "RESULTADO DO MÊS"), "RESULTADO DO MÊS");
+  const rRes = need(find(titulo("RESULTADO DO MÊS")), "RESULTADO DO MÊS");
   m.sobra1 = v(rRes + 1, 3); m.sobraFinal = v(rRes + 2, 3); m.previsto = v(rRes + 3, 3);
   m.alerta = String(v(rRes + 4, 1) || "");
 
   // Carlos
-  const rCH = need(find(t => t === "O QUE O CARLOS DÁ"), "bloco do Carlos");
-  const rNu = need(find(t => t.startsWith("NUBANK CARLOS"), rCH), "NUBANK CARLOS");
+  const rCH = need(find(titulo("O QUE O CARLOS DÁ")), "bloco do Carlos");
+  const rNu = need(find(comeca("NUBANK CARLOS"), rCH), "NUBANK CARLOS");
   m.carlos = { mensalRow: rCH + 1, mensal: v(rCH + 1, 3), extras: [], nubank: v(rNu, 3), total: v(rNu + 1, 3), entrou: v(rNu + 2, 3), dif: v(rNu + 3, 3) };
   for (let r = rCH + 2; r < rNu; r++) m.carlos.extras.push({ row: r, nome: A(r), valor: v(r, 3) });
 
   // cartões
-  const rCT = need(find(t => t === "CARTÕES"), "CARTÕES");
-  const rCTt = need(find(t => t === "TOTAL DAS FATURAS", rCT), "TOTAL DAS FATURAS");
+  const rCT = need(find(titulo("CARTÕES")), "CARTÕES");
+  const rCTt = need(find(titulo("TOTAL DAS FATURAS"), rCT), "TOTAL DAS FATURAS");
   m.cartoes = [];
   for (let r = rCT + 2; r < rCTt; r++)
     m.cartoes.push({ row: r, nome: A(r), final: String(v(r, 2)), dia: num(v(r, 3)), melhor: num(v(r, 4)), venc: v(r, 5), fatura: v(r, 6), hoje: String(v(r, 7)), ajuste: v(r, 8) });
 
   // total parcelado (próximos 12 meses)
-  const rTP = find(t => t.startsWith("TOTAL PARCELADO"));
-  m.proj = { meses: [], linhas: {} };
+  const rTP = find(comeca("TOTAL PARCELADO"));
+  m.proj = { meses: [], linhas: {} }; // linhas: chave = nome do cartão normalizado
   if (rTP > 0) {
     for (let c = 2; c <= 13; c++) m.proj.meses.push(String(v(rTP + 1, c)));
-    for (let r = rTP + 2; A(r) && A(r) !== "TOTAL"; r++) m.proj.linhas[A(r)] = Array.from({ length: 12 }, (_, i) => v(r, i + 2));
+    for (let r = rTP + 2; A(r) && norm(A(r)) !== "TOTAL"; r++) m.proj.linhas[norm(A(r))] = Array.from({ length: 12 }, (_, i) => v(r, i + 2));
   }
 
   // porquinho
-  const rPQ = find(t => t.startsWith("PORQUINHO"));
-  const rLists = find(t => t === "COMPRAS DE CADA CARTÃO");
+  const rPQ = find(comeca("PORQUINHO"));
+  const rLists = find(titulo("COMPRAS DE CADA CARTÃO"));
   m.porquinho = [];
   if (rPQ > 0 && rLists > 0)
     for (let r = rPQ + 2; r < rLists - 1; r++) m.porquinho.push({ row: r, data: v(r, 1), inter: v(r, 2), mp: v(r, 3), total: v(r, 4), dif: v(r, 5), obs: String(v(r, 6)) });
@@ -201,23 +214,24 @@ function parse(g) {
   // listas de compras de cada cartão
   m.listas = [];
   for (let r = 1; r <= n; r++) {
-    if (A(r) !== "COMPRA" || String(v(r, 2)) !== "VALOR") continue;
-    const rT = find(t => t.startsWith("TOTAL DA FATURA"), r + 1);
+    if (norm(v(r, 1)) !== "COMPRA" || norm(v(r, 2)) !== "VALOR") continue;
+    const rT = find(comeca("TOTAL DA FATURA"), r + 1);
     if (rT < 0) break;
-    const nome = A(r - 2).replace(/^CARTÃO /, "").split(" •")[0].trim();
+    const nome = A(r - 2).replace(/^CART[ÃA]O\s+/i, "").split("•")[0].replace(/\s+/g, " ").trim();
     const itens = [];
     for (let i = r + 1; i < rT; i++)
-      itens.push({ row: i, nome: A(i), valor: v(i, 2), data: v(i, 3), parc: v(i, 4), fat: String(v(i, 5)), sit: String(v(i, 6)), noMes: v(i, 7), ini: h(i, 0), fim: h(i, 1) });
+      itens.push({ row: i, nome: A(i), valor: v(i, 2), data: v(i, 3), parc: parcOf(v(i, 4)), fat: String(v(i, 5)).trim(), sit: String(v(i, 6)), noMes: v(i, 7), ini: h(i, 0), fim: h(i, 1) });
     m.listas.push({ nome, titleRow: r - 2, first: r + 1, last: rT - 1, totalRow: rT, total: v(rT, 7), itens });
     r = rT;
   }
   // liga cada lista ao seu cartão (NUBANK tem duas: a dela e a do Carlos)
   for (const l of m.listas) {
-    const card = m.cartoes.filter(c => l.nome.startsWith(c.nome)).sort((a, b) => b.nome.length - a.nome.length)[0];
+    const ln = norm(l.nome);
+    const card = m.cartoes.filter(c => ln.startsWith(norm(c.nome))).sort((a, b) => b.nome.length - a.nome.length)[0];
     l.card = card ? card.nome : l.nome;
-    l.label = /CARLOS/.test(l.nome) ? "Nubank do Carlos" : /\(MEU\)/.test(l.nome) ? "Nubank (meu)" : titleCase(l.nome);
+    l.label = /CARLOS/.test(ln) ? "Nubank do Carlos" : /\(MEU\)/.test(ln) ? "Nubank (meu)" : titleCase(card && norm(card.nome) === ln ? card.nome : l.nome);
   }
-  m.ranges = { rRes, rCH, rNu, rFix, rTotFix, rEnt, rTotEnt, title: need(find(t => /^MÊS [A-ZÇ]+ \d{4}$/.test(t)), "título do mês"), carlosDif: rNu + 3, rCT, rCTt };
+  m.ranges = { rRes, rCH, rNu, rFix, rTotFix, rEnt, rTotEnt, title: need(find(t => /^MES [A-Z]+ \d{4}$/.test(t)), "título do mês"), carlosDif: rNu + 3, rCT, rCTt };
   return m;
 }
 
@@ -441,7 +455,10 @@ function busy(text) {
 }
 function renderBanner() {
   const b = $("#banner");
-  if (!DEMO && !Token.get() && S.m) {
+  if (DEMO) {
+    b.innerHTML = `<span>Modo de teste: dados inventados. Nada do que mexer aqui vai para a planilha.</span><a class="btn-sair" href="./">Sair do teste</a>`;
+    b.hidden = false;
+  } else if (!Token.get() && S.m) {
     b.innerHTML = `<span>Mostrando os últimos valores guardados. Entre de novo para atualizar.</span><button id="relogin">Entrar</button>`;
     b.hidden = false; $("#relogin").onclick = () => googleLogin();
   } else b.hidden = true;
@@ -615,7 +632,8 @@ function viewCartao() {
     const itens = l.itens.filter(it => it.nome || it.valor !== "");
     const ativos = itens.filter(it => num(it.noMes) > 0 || it.sit === "ESCOLHA A 1ª FATURA");
     const futuras = itens.filter(it => it.sit === "FUTURA");
-    const proj = m.proj.linhas[l.nome] || m.proj.linhas[Object.keys(m.proj.linhas).find(k => k.startsWith(l.nome)) || ""];
+    const ln = norm(l.nome);
+    const proj = m.proj.linhas[ln] || m.proj.linhas[Object.keys(m.proj.linhas).find(k => k.startsWith(ln)) || ""];
     const prox = proj ? proj.slice(1).map((v, i) => ({ v: num(v), mes: m.proj.meses[i + 1] })).filter(x => x.v > 0) : [];
     const maxP = Math.max(1, ...prox.map(x => x.v));
     return `${secHead(listas.length > 1 ? l.label : "Compras desta fatura", `${ativos.length} compras · total ${brl(l.total)}`, cor)}
@@ -707,7 +725,7 @@ function viewMais() {
     <p class="ver">Automático segue o iPhone: claro de dia, escuro à noite.</p>
 
     ${secHead("Planilha e conta", email ? esc(email) : "", "#868e96")}
-    <a class="btn ghost" href="https://docs.google.com/spreadsheets/d/${esc(CFG.SPREADSHEET_ID)}/edit" target="_blank" rel="noopener">Abrir a planilha no Google</a>
+    ${DEMO ? "" : `<a class="btn ghost" href="https://docs.google.com/spreadsheets/d/${esc(CFG.SPREADSHEET_ID)}/edit" target="_blank" rel="noopener">Abrir a planilha no Google</a>`}
     <button class="btn ghost" data-act="logout">Sair da conta</button>
     <p class="ver">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
@@ -984,16 +1002,26 @@ $("#mes-prev").onclick = () => mudaMes(-1);
 $("#mes-next").onclick = () => mudaMes(1);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.m && Date.now() - (S.at || 0) > 60000) refresh({ quiet: true }); });
 
-/* ======================= modo de teste (só no computador) ======================= */
+/* ======================= modo de teste (?demo) ======================= */
 const Demo = {
   g: null,
+  // no computador: a cópia real (demo-grid.json, fora do git) se existir; ?demo=ficticio força os inventados
+  async load() {
+    const real = LOCAL && new URLSearchParams(location.search).get("demo") !== "ficticio";
+    if (real) { try { const r = await fetch("demo-grid.json", { cache: "no-store" }); if (r.ok) return r.json(); } catch (e) {} }
+    const r = await fetch("demo-ficticio.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("Não achei os dados de teste.");
+    return r.json();
+  },
   async api(path, opts) {
-    if (!this.g) this.g = await (await fetch("demo-grid.json")).json();
+    if (!this.g) this.g = await Demo.load();
     if (path.startsWith("/values:batchGet")) return { valueRanges: [{ values: this.g.main }, { values: this.g.helper }, { values: this.g.tab }] };
     const put = (range, values) => {
       const mm = /^(\w+)!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/.exec(range); if (!mm || mm[1] !== "CASA") return;
       const c0 = mm[2].charCodeAt(0) - 64, r0 = Number(mm[3]);
       values.forEach((row, i) => row.forEach((val, j) => { const R = this.g.main[r0 - 1 + i] || (this.g.main[r0 - 1 + i] = []); R[c0 - 1 + j] = val; }));
+      // A:E de uma compra: faz o papel das fórmulas de SITUAÇÃO e NO MÊS (o resto dos totais não recalcula)
+      if (c0 === 1 && values.every(row => row.length === 5)) values.forEach((_, i) => this.simulaCompra(r0 - 1 + i));
     };
     if (path.startsWith("/values:batchUpdate")) { JSON.parse(opts.body).data.forEach(d => put(d.range, d.values)); return {}; }
     if (path.startsWith("/values:batchClear")) {
@@ -1009,6 +1037,19 @@ const Demo = {
     }
     if (path.startsWith("?fields") || path.startsWith(":batchUpdate")) throw new Error("No modo de teste não dá para fechar o mês.");
     return {};
+  },
+  simulaCompra(i) {
+    const R = this.g.main[i], H = this.g.helper[i] || (this.g.helper[i] = []);
+    const [nome, valor, , parc, fat] = R;
+    if (!nome && valor === "") { R[5] = R[6] = ""; H[0] = H[1] = ""; return; }
+    const idx = lbl => { const t = this.g.tab.find(x => norm(x[0]) === norm(lbl)); return t ? Number(t[2]) : null; };
+    const cur = idx(this.g.main[1][1]), ini = idx(fat);
+    if (ini === null || cur === null) { R[5] = "ESCOLHA A 1ª FATURA"; R[6] = 0; return; }
+    const n = parc === "FIXO" ? Infinity : Math.max(1, Number(parc) || 1), k = cur - ini + 1;
+    H[0] = ini; H[1] = n === Infinity ? "" : ini + n - 1;
+    if (k < 1) { R[5] = "FUTURA"; R[6] = 0; }
+    else if (k > n) { R[5] = "ACABOU"; R[6] = 0; }
+    else { R[5] = parc === "FIXO" ? "FIXO" : n > 1 ? `P ${k}/${n}` : "À VISTA"; R[6] = valor; }
   },
 };
 

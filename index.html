@@ -9,10 +9,11 @@
   <meta name="color-scheme" content="light dark">
   <script>
     // Tema dia/noite antes de desenhar a tela (evita piscar branco à noite).
-    // casa.tema: "dia", "noite" ou nada (= automático, segue o iPhone).
+    // tema: "dia", "noite" ou nada (= automático, segue o iPhone).
     (function () {
       var mq = matchMedia("(prefers-color-scheme: dark)");
-      function pref() { try { return JSON.parse(localStorage.getItem("casa.tema")); } catch (e) { return null; } }
+      var key = /[?&]demo(=|&|$)/.test(location.search) ? "casa-demo.tema" : "casa.tema"; // o teste guarda separado
+      function pref() { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } }
       function apply() {
         var p = pref(), t = p === "dia" ? "light" : p === "noite" ? "dark" : (mq.matches ? "dark" : "light");
         document.documentElement.setAttribute("data-theme", t);

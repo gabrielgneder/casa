@@ -24,8 +24,8 @@ self.addEventListener("fetch", e => {
   const url = new URL(req.url);
   // Google (login, planilha) nunca passa pelo cache
   if (url.origin !== self.location.origin) return;
-  // dados de teste locais nunca vão para o cache
-  if (url.pathname.endsWith("demo-grid.json")) return;
+  // dados de teste nunca vão para o cache
+  if (/\/demo-[^/]*\.json$/.test(url.pathname)) return;
 
   // Página: tenta a rede primeiro (pega atualizações), cai no cache se estiver offline
   if (req.mode === "navigate") {

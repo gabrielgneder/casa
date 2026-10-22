@@ -8,11 +8,12 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 2. **A versão é carimbada pela Action** (`.github/workflows/deploy.yml`): a cada push na `main`, `VERSION` em `sw.js` e `APP_VERSION` em `app.js` viram o hash do commit. Não precisa mudar à mão, mas não renomeie essas duas constantes (a Action falha se não achar). Arquivo novo do app precisa entrar em `SHELL` no `sw.js` **e** no passo "Montar a pasta publicada" da Action.
 3. **`config.js` é o único arquivo de configuração** (`GOOGLE_CLIENT_ID`, `SPREADSHEET_ID`).
 4. **O app nunca grava em célula com fórmula.** Só nas colunas de digitar: listas de compras (A:E), contas fixas (A:C e E:F — a coluna D é fórmula), entradas (A, C), Carlos (A, C), cartões (C, D, H), porquinho (A:C, F), mês (B2). Sempre `valueInputOption: RAW`; datas vão como número de série (dias desde 30/12/1899).
-5. **Os blocos são achados pelos títulos da coluna A** (`parse()` em `app.js`). Se mudar um título na planilha, mudar também no `parse()`.
+5. **Os blocos são achados pelos títulos da coluna A** (`parse()` em `app.js`), comparados com `norm()` (sem acento, espaços extras ou diferença de maiúscula). Se mudar as palavras de um título na planilha, mudar também no `parse()`. `node testes/parser.js` testa o `parse()` com títulos bagunçados (roda na Action); ele extrai do `app.js` as linhas `const num`, `const norm`, `const titleCase` e `function parse` — mantenha cada uma dessas constantes numa linha só.
 6. **Antes de editar ou apagar uma linha, conferir que ela ainda é a mesma** (`sameRow`) — duas pessoas usam a mesma planilha.
 7. **Escopo do Google: `openid email https://www.googleapis.com/auth/spreadsheets`.** O `drive.file` não serve: a planilha não foi criada pelo app.
 8. **O endereço não pode mudar:** `https://gabrielgneder.github.io/casa/` (GitHub Pages da conta do Gabriel). O ID do cliente OAuth é o mesmo do app das receitas (projeto no Google Cloud da Maria); o redirecionamento cadastrado é essa URL com barra no final.
-9. **Nada de dados reais no repositório.** `demo-grid.json` (cópia da planilha para testar) fica fora do git.
+9. **Nada de dados reais no repositório.** `demo-grid.json` (cópia da planilha para testar) fica fora do git. `demo-ficticio.json` é inventado (gerado de uma cópia da planilha com valores falsos, recalculada no Excel) e é publicado para o modo de teste.
+10. **O modo de teste (`?demo`) guarda tudo em `casa-demo.*`**, separado do app de verdade (mesmo endereço, mesmo `localStorage`). Não use `localStorage` direto: use `store`.
 
 ## Arquivos
 
@@ -30,7 +31,9 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 python -m http.server 8090 --bind 127.0.0.1
 ```
 
-Abrir `http://localhost:8090/?demo` — usa `demo-grid.json` (gerado da planilha recalculada) e não toca no Google. Gravações ficam só na memória e as fórmulas não recalculam.
+Abrir `http://localhost:8090/?demo` — usa `demo-grid.json` se existir (cópia real), senão `demo-ficticio.json`; `?demo=ficticio` força os inventados. Não toca no Google. Gravações ficam só na memória e as fórmulas não recalculam.
+
+No celular: `https://gabrielgneder.github.io/casa/?demo` (sempre dados inventados).
 
 ## Publicar
 

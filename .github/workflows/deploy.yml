@@ -37,6 +37,9 @@ jobs:
             node --check "$f"
           done
 
+      - name: Testar a leitura da planilha (parse)
+        run: node testes/parser.js
+
       - name: Carimbar a versão com o commit
         run: |
           SHA="${GITHUB_SHA::7}"
@@ -48,7 +51,7 @@ jobs:
       - name: Montar a pasta publicada
         run: |
           mkdir _site
-          cp index.html styles.css app.js config.js sw.js manifest.webmanifest _site/
+          cp index.html styles.css app.js config.js sw.js manifest.webmanifest demo-ficticio.json _site/
           cp -r icons _site/
           # o service worker precisa achar todos os arquivos que ele guarda
           for f in $(grep -oE '"(icons/)?[a-z0-9.-]+\.(html|css|js|webmanifest|png)"' sw.js | tr -d '"'); do
