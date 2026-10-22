@@ -505,7 +505,7 @@ function render() {
   $("#mes-nome").textContent = m.cur ? titleCase(m.cur.nome) : m.mes;
   $("#mes-prev").disabled = !m.cur || !monthByIdx(m.cur.idx - 1);
   $("#mes-next").disabled = !m.cur || !monthByIdx(m.cur.idx + 1);
-  $$(".tabs button").forEach(b => { const on = b.dataset.tab === S.tab || (S.tab === "cartao" && b.dataset.tab === "cartoes"); b.classList.toggle("on", on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); });
+  $$(".tabs [data-tab]").forEach(b => { const on = b.dataset.tab === S.tab || (S.tab === "cartao" && b.dataset.tab === "cartoes"); b.classList.toggle("on", on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); });
   const views = { inicio: viewInicio, cartoes: viewCartoes, contas: viewContas, mais: viewMais, cartao: viewCartao };
   main.innerHTML = (views[S.tab] || viewInicio)() + statusHtml();
   renderStatus();
@@ -1124,7 +1124,7 @@ document.addEventListener("click", async e => {
     }
   }
 });
-$$(".tabs button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); scrollTo({ top: 0 }); });
+$$(".tabs [data-tab]").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); scrollTo({ top: 0 }); });
 $("#fab").onclick = () => S.m && compraSheet({ cardNome: S.tab === "cartao" ? S.card : null });
 // Trocar o mês muda a planilha para todo mundo: pede confirmação sempre (um toque sem querer na seta não basta).
 const mudaMes = async (d, alvo) => {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Casa</title>
   <meta name="description" content="Gastos da casa, cartões e sobras do mês.">
-  <meta name="theme-color" content="#1d5c4d">
+  <meta name="theme-color" content="#0e3b31">
   <meta name="color-scheme" content="light dark">
   <script>
     // Tema dia/noite antes de desenhar a tela (evita piscar branco à noite).
@@ -18,7 +18,7 @@
         var p = pref(), t = p === "dia" ? "light" : p === "noite" ? "dark" : (mq.matches ? "dark" : "light");
         document.documentElement.setAttribute("data-theme", t);
         var m = document.querySelector('meta[name="theme-color"]');
-        if (m) m.setAttribute("content", t === "dark" ? "#0a231d" : "#1d5c4d");
+        if (m) m.setAttribute("content", t === "dark" ? "#0a231d" : "#0e3b31"); // igual ao topo do app
       }
       apply();
       if (mq.addEventListener) mq.addEventListener("change", apply); else mq.addListener(apply);
@@ -28,7 +28,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Casa">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -82,11 +82,10 @@
 
   <main id="main" tabindex="-1"></main>
 
-  <button class="fab" id="fab" aria-label="Lançar compra"><svg><use href="#i-plus"/></svg><span>Compra</span></button>
-
   <nav class="tabs" aria-label="Seções">
     <button data-tab="inicio" class="on"><svg><use href="#i-home"/></svg><span>Início</span></button>
     <button data-tab="cartoes"><svg><use href="#i-card"/></svg><span>Cartões</span></button>
+    <button class="fab" id="fab" aria-label="Lançar compra"><svg><use href="#i-plus"/></svg><span>Compra</span></button>
     <button data-tab="contas"><svg><use href="#i-list"/></svg><span>Contas</span></button>
     <button data-tab="mais"><svg><use href="#i-more"/></svg><span>Mais</span></button>
   </nav>
