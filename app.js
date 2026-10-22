@@ -540,7 +540,7 @@ function viewInicio() {
 
 function ccHtml(c, big) {
   return `<button class="cc ${big ? "cc-big" : ""}" data-act="open-card" data-card="${esc(c.nome)}" style="${cardStyle(c.nome)}">
-    <span class="cc-top"><span class="cc-name">${esc(titleCase(c.nome))}</span><svg class="cc-wave"><use href="#i-wave"/></svg></span>
+    <span class="cc-top"><span class="cc-name">${esc(titleCase(c.nome))}</span><span class="cc-pill">melhor dia ${c.melhor}</span></span>
     <span class="cc-chip"></span>
     <span class="cc-lbl">Fatura de ${esc(mesCurto())}</span>
     <span class="cc-val">${brl(c.fatura)}</span>
@@ -550,8 +550,27 @@ function ccHtml(c, big) {
 function viewCartoes() {
   const m = S.m;
   const tot = m.cartoes.reduce((a, c) => a + num(c.fatura), 0);
-  return `${secHead("Meus cartões", `Toque num cartão para ver as compras · total ${brl(tot)}`, "#5c7cfa")}
-    <div class="wallet">${m.cartoes.map(c => ccHtml(c)).join("")}</div>`;
+  const hoje = todaySerial();
+  const prazos = m.cartoes.map(c => {
+    const f = faturaPara(c, hoje);
+    const venc = f && typeof f.serial === "number" ? f.serial + c.dia - 1 : null;
+    return { c, f, venc, dias: venc === null ? -1 : venc - hoje };
+  }).sort((a, b) => b.dias - a.dias);
+  const top = prazos[0];
+  const linhas = prazos.map(p => `<button class="item" data-act="edit-cartao" data-card="${esc(p.c.nome)}">
+      ${miniCard(p.c.nome)}
+      <span class="item-main"><span class="item-t">${esc(titleCase(p.c.nome))}</span>
+        <span class="item-s">melhor dia <b>${p.c.melhor}</b> · comprando hoje, paga ${p.venc !== null ? "em " + esc(fmtDate(p.venc, "short")) : "—"}</span></span>
+      <span class="item-v">${p.dias >= 0 ? p.dias + " dias" : ""}<small>de prazo</small></span></button>`).join("");
+  return `${top && top.dias >= 0 ? `<div class="bestday">
+      <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-calendar"/></svg></span>
+      <span><span class="bd-l">Hoje, o cartão que dá mais prazo é</span><b>${esc(titleCase(top.c.nome))}</b><span class="bd-s">paga só em ${esc(fmtDate(top.venc, "short"))} · ${top.dias} dias</span></span>
+    </div>` : ""}
+    ${secHead("Meus cartões", `Toque num cartão para ver as compras · total ${brl(tot)}`, "#5c7cfa")}
+    <div class="wallet">${m.cartoes.map(c => ccHtml(c)).join("")}</div>
+    ${secHead("Melhor dia para comprar", "Toque num cartão para mudar o melhor dia deste mês", "#2f9e44")}
+    <div class="list">${linhas}</div>
+    <p class="ver">O melhor dia muda todo mês. Os dias de prazo são contados até o vencimento “regra” do cartão.</p>`;
 }
 
 function parcInfo(it) {
@@ -683,7 +702,7 @@ function viewMais() {
     <button class="btn ghost" data-act="logout">Sair da conta</button>
     <p class="ver">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
-const APP_VERSION = "4";
+const APP_VERSION = "5";
 
 /* ======================= folhas (formulários) ======================= */
 function openSheet(title, body, onMount) {
@@ -745,9 +764,10 @@ function compraSheet({ cardNome, item }) {
       <small id="f-total"></small></label>
     <label class="field"><span>Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
     <div class="field"><span>Entra na fatura de</span>
-      <div class="fatura-box"><b id="f-fat"></b><button type="button" id="f-fat-mudar">Mudar</button></div>
-      <select class="input" id="f-fat-sel" hidden>${monthOptions(fat)}</select>
-      <small id="f-fat-hint"></small></div>
+      <div class="tip" id="f-best"></div>
+      <div class="choices" id="f-fat-opts"></div>
+      <button type="button" class="linkbtn" id="f-fat-mudar">Escolher outro mês</button>
+      <select class="input" id="f-fat-sel" hidden>${monthOptions(fat)}</select></div>
     <div class="stack"><button class="btn" id="f-ok">${item ? "Salvar alteração" : "Salvar compra"}</button>
       ${item ? `<button class="btn danger" id="f-del">Apagar esta compra</button>` : ""}</div>`;
 
@@ -758,10 +778,16 @@ function compraSheet({ cardNome, item }) {
       $("#lbl-valor", el).textContent = tipo === "parc" ? "Valor de CADA parcela" : tipo === "fixo" ? "Valor por mês" : "Valor";
       const v = parseMoney($("#f-valor", el).value);
       $("#f-total", el).textContent = tipo === "parc" && v ? `Total da compra: ${brl(v * nParc)} (${nParc}× ${brl(v)})` : "";
-      const x = monthByLabel(fat);
-      $("#f-fat", el).textContent = x ? titleCase(x.nome) : "escolha o cartão";
+      const c = cardOf(), auto = monthByLabel(autoFat());
+      $("#f-best", el).innerHTML = c && auto
+        ? `<b>Melhor dia de compra do ${esc(titleCase(c.nome))}: dia ${c.melhor}.</b> Comprando em ${esc(fmtDate(dataSerial, "short"))}, a compra cai na fatura de <b>${esc(titleCase(auto.nome).split(" ")[0].toLowerCase())}</b>. Se o banco colocou em outra, é só tocar no mês certo.`
+        : "Escolha o cartão lá em cima.";
+      const opts = auto ? [-1, 0, 1].map(d => monthByIdx(auto.idx + d)).filter(Boolean) : [];
+      $("#f-fat-opts", el).innerHTML = opts.map(o => `<button type="button" class="choice month ${o.label === fat ? "on" : ""}" data-fat="${esc(o.label)}">${esc(titleCase(o.nome).split(" ")[0])}<small>${o.label === auto.label ? "calculado" : esc(o.nome.split(" ")[1] || "")}</small></button>`).join("");
+      $$("[data-fat]", el).forEach(b => b.onclick = () => { fat = b.dataset.fat; fatManual = fat !== auto.label; upd(); });
+      const fora = fat && !opts.some(o => o.label === fat);
+      $("#f-fat-sel", el).hidden = !fora && $("#f-fat-sel", el).dataset.open !== "1";
       $("#f-fat-sel", el).value = fat;
-      $("#f-fat-hint", el).textContent = fatManual ? "" : "Calculado pelo melhor dia de compra do cartão.";
     };
     $$("[data-lista]", el).forEach(b => b.onclick = () => {
       lista = m.listas.find(l => l.nome === b.dataset.lista);
@@ -773,7 +799,7 @@ function compraSheet({ cardNome, item }) {
     $$("[data-step]", el).forEach(b => b.onclick = () => { nParc = Math.min(48, Math.max(2, nParc + Number(b.dataset.step))); upd(); });
     $("#f-valor", el).oninput = upd;
     $("#f-data", el).onchange = e => { const s = isoToSerial(e.target.value); if (s) { dataSerial = s; if (!fatManual) fat = autoFat(); upd(); } };
-    $("#f-fat-mudar", el).onclick = () => { $("#f-fat-sel", el).hidden = false; $("#f-fat-sel", el).focus(); };
+    $("#f-fat-mudar", el).onclick = () => { const sel = $("#f-fat-sel", el); sel.dataset.open = "1"; sel.hidden = false; sel.focus(); };
     $("#f-fat-sel", el).onchange = e => { fat = e.target.value; fatManual = true; upd(); };
     upd();
     $("#f-ok", el).onclick = async () => {
