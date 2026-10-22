@@ -5,7 +5,7 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 ## Regras que não podem ser quebradas
 
 1. **Sem build e sem dependências.** Os arquivos são servidos como estão.
-2. **Toda release precisa aumentar `VERSION` em `sw.js`** (`casa-vN` → `casa-vN+1`) e `APP_VERSION` em `app.js`.
+2. **A versão é carimbada pela Action** (`.github/workflows/deploy.yml`): a cada push na `main`, `VERSION` em `sw.js` e `APP_VERSION` em `app.js` viram o hash do commit. Não precisa mudar à mão, mas não renomeie essas duas constantes (a Action falha se não achar). Arquivo novo do app precisa entrar em `SHELL` no `sw.js` **e** no passo "Montar a pasta publicada" da Action.
 3. **`config.js` é o único arquivo de configuração** (`GOOGLE_CLIENT_ID`, `SPREADSHEET_ID`).
 4. **O app nunca grava em célula com fórmula.** Só nas colunas de digitar: listas de compras (A:E), contas fixas (A:C e E:F — a coluna D é fórmula), entradas (A, C), Carlos (A, C), cartões (C, D, H), porquinho (A:C, F), mês (B2). Sempre `valueInputOption: RAW`; datas vão como número de série (dias desde 30/12/1899).
 5. **Os blocos são achados pelos títulos da coluna A** (`parse()` em `app.js`). Se mudar um título na planilha, mudar também no `parse()`.
@@ -34,4 +34,4 @@ Abrir `http://localhost:8090/?demo` — usa `demo-grid.json` (gerado da planilha
 
 ## Publicar
 
-Commit e push; o GitHub Pages publica sozinho. Lembrar da regra 2.
+Commit e push na `main`. A Action confere a sintaxe, carimba a versão e publica (Settings → Pages → Source: **GitHub Actions**). Acompanhe em github.com/gabrielgneder/casa/actions.

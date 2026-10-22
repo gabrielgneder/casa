@@ -1,5 +1,5 @@
 // Service worker: deixa o app abrir sem internet (com os últimos valores guardados).
-// Ao publicar uma versão nova, aumente o número em VERSION para o celular baixar os arquivos novos.
+// VERSION é trocada pelo hash do commit na publicação (.github/workflows/deploy.yml); o celular baixa os arquivos novos sozinho.
 const VERSION = "casa-v7";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",

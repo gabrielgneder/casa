@@ -1,0 +1,63 @@
+# Publica o app no GitHub Pages a cada push na main.
+# Carimba a versão com o hash do commit (sw.js e app.js), então o iPhone
+# sempre baixa os arquivos novos — não precisa mais aumentar a versão à mão.
+name: Publicar
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Conferir a sintaxe do JavaScript
+        run: |
+          for f in *.js; do
+            echo "checando $f"
+            node --check "$f"
+          done
+
+      - name: Carimbar a versão com o commit
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          sed -i -E "s/^const VERSION = \"[^\"]*\";/const VERSION = \"casa-$SHA\";/" sw.js
+          sed -i -E "s/^const APP_VERSION = \"[^\"]*\";/const APP_VERSION = \"$SHA\";/" app.js
+          grep -q "const VERSION = \"casa-$SHA\";" sw.js || { echo "::error::não achei VERSION em sw.js"; exit 1; }
+          grep -q "const APP_VERSION = \"$SHA\";" app.js || { echo "::error::não achei APP_VERSION em app.js"; exit 1; }
+
+      - name: Montar a pasta publicada
+        run: |
+          mkdir _site
+          cp index.html styles.css app.js config.js sw.js manifest.webmanifest _site/
+          cp -r icons _site/
+          # o service worker precisa achar todos os arquivos que ele guarda
+          for f in $(grep -oE '"(icons/)?[a-z0-9.-]+\.(html|css|js|webmanifest|png)"' sw.js | tr -d '"'); do
+            test -f "_site/$f" || { echo "::error::sw.js guarda $f, mas ele não foi publicado"; exit 1; }
+          done
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
