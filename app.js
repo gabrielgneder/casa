@@ -701,6 +701,11 @@ function viewMais() {
       <button class="btn" data-act="fechar">Fechar ${esc(m.cur ? titleCase(m.cur.nome) : "o mês")}</button>
     </div>
 
+    ${secHead("Dia e noite", "cores da tela", "#fab005")}
+    <div class="choices theme-pick">${[["", "i-auto", "Automático"], ["dia", "i-sun", "Dia"], ["noite", "i-moon", "Noite"]].map(([v, ic, l]) =>
+      `<button type="button" class="choice ${(store.get("tema") || "") === v ? "on" : ""}" data-act="tema" data-tema="${v}"><svg><use href="#${ic}"/></svg>${l}</button>`).join("")}</div>
+    <p class="ver">Automático segue o iPhone: claro de dia, escuro à noite.</p>
+
     ${secHead("Planilha e conta", email ? esc(email) : "", "#868e96")}
     <a class="btn ghost" href="https://docs.google.com/spreadsheets/d/${esc(CFG.SPREADSHEET_ID)}/edit" target="_blank" rel="noopener">Abrir a planilha no Google</a>
     <button class="btn ghost" data-act="logout">Sair da conta</button>
@@ -950,6 +955,11 @@ document.addEventListener("click", async e => {
       if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES, as compras que já acabaram saem das listas e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
         run("fecharMes", {}, { busyText: "Fechando o mês…" });
       return;
+    }
+    case "tema": {
+      if (t.dataset.tema) store.set("tema", t.dataset.tema); else store.del("tema");
+      if (window.casaTema) window.casaTema();
+      return render();
     }
     case "logout": {
       if (!(await confirmSheet("Sair da conta?", "Para usar de novo, é só entrar com o Google.", "Sair"))) return;

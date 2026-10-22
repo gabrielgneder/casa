@@ -19,7 +19,7 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 | Arquivo | Função |
 |---|---|
 | `index.html` | Estrutura e ícones SVG |
-| `styles.css` | Visual "carteira": cartões desenhados nas cores da planilha; compras com amarelo = parcelado, verde = última, rosa = todo mês (iguais à planilha) |
+| `styles.css` | Visual "carteira": cartões desenhados nas cores da planilha; compras com amarelo = parcelado, verde = última, rosa = todo mês (iguais à planilha). Modo dia/noite: cor que depende do fundo é variável em `:root`, e `:root[data-theme="dark"]` troca as variáveis — não use cor fixa para fundo, texto ou borda de superfície |
 | `app.js` | Login Google, leitura/gravação na planilha, telas, fechar o mês |
 | `config.js` | ID do cliente OAuth e ID da planilha |
 | `sw.js` | Service worker (abre sem internet com os últimos valores) |
