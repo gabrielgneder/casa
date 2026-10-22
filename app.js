@@ -519,7 +519,7 @@ function loginHtml() {
     <h1>Contas da casa</h1>
     <p>Os gastos, os cartões e o que sobra no mês, tudo num lugar só. Fica guardado na planilha CASA, no Google.</p>
     <button class="btn big" data-act="login"><svg><use href="#i-google"/></svg>Entrar com o Google</button>
-    <div class="login-hint"><svg><use href="#i-info"/></svg><span>Se aparecer “O Google não verificou este app”, toque em <b>Avançado</b> e depois em <b>Acessar</b>. É normal: o app é só da família.</span></div>
+    <div class="login-hint"><svg><use href="#i-info"/></svg><span>Se aparecer “A Google não validou esta app”, toque em <b>Continuar</b> (à esquerda, não no botão azul) e depois em <b>Continuar</b> de novo. Se pedir, deixe marcada a caixinha das planilhas. É normal: o app é só da família.</span></div>
   </div>`;
 }
 
