@@ -44,15 +44,15 @@ function parseMoney(s) {
 const moneyInput = v => (typeof v === "number" ? v.toFixed(2).replace(".", ",") : "");
 
 /* ======================= cores dos cartões (as mesmas da planilha) ======================= */
-const BRANDS = [ // [nome, fundo (igual à planilha), letra com bom contraste]
-  [/SAMS/, "#6FA8DC", "#000"], [/CARREFOUR/, "#00FFFF", "#000"], [/PICPAY/, "#00FF00", "#000"],
-  [/AMAZON/, "#999999", "#000"], [/ITI/, "#FF00FF", "#000"], [/NUBANK/, "#9900FF", "#fff"],
-  [/MERCADO PAGO/, "#000000", "#fff"], [/INTER/, "#FF9900", "#000"], [/RENNER/, "#E00000", "#fff"],
+const BRANDS = [ // [nome, cor da planilha, tom escuro do degradê, letra]
+  [/SAMS/, "#6FA8DC", "#2f6fb5", "#fff"], [/CARREFOUR/, "#19D3F0", "#0089b3", "#fff"], [/PICPAY/, "#22D36B", "#0a8f45", "#fff"],
+  [/AMAZON/, "#A3A9B1", "#4d5560", "#fff"], [/ITI/, "#FF4FD2", "#c2009a", "#fff"], [/NUBANK/, "#A23CFF", "#5f00b8", "#fff"],
+  [/MERCADO PAGO/, "#3a3a3a", "#000000", "#fff"], [/INTER/, "#FF9A1F", "#e85d00", "#fff"], [/RENNER/, "#FF3B3B", "#b30000", "#fff"],
 ];
 function brand(name) {
   const n = String(name || "").toUpperCase();
-  for (const [re, bg, fg] of BRANDS) if (re.test(n)) return { bg, fg };
-  return { bg: "#cfd8d4", fg: "#18201d" };
+  for (const [re, c1, c2, fg] of BRANDS) if (re.test(n)) return { c1, c2, fg, bg: `linear-gradient(135deg, ${c1}, ${c2})` };
+  return { c1: "#8fa39b", c2: "#5b6f67", fg: "#fff", bg: "linear-gradient(135deg, #8fa39b, #5b6f67)" };
 }
 const titleCase = s => String(s || "").toLowerCase().replace(/(^|[\s(–-])([a-zà-ú])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bC\/c\b/i, "C/C");
 
@@ -466,163 +466,224 @@ function render() {
 
 function loginHtml() {
   return `<div class="login">
-    <img class="logo" src="icons/icon-192.png" alt="">
+    <div class="login-art"><img src="icons/icon-192.png" alt=""></div>
     <h1>Contas da casa</h1>
-    <p>Entre com a sua conta do Google para ver e lançar os gastos. Tudo fica guardado na planilha CASA, no Google.</p>
-    <button class="btn" data-act="login">Entrar com o Google</button>
-    <p class="hint">Se aparecer “O Google não verificou este app”, toque em <b>Avançado</b> e depois em <b>Acessar</b>. É normal, o app é só da família.</p>
+    <p>Os gastos, os cartões e o que sobra no mês, tudo num lugar só. Fica guardado na planilha CASA, no Google.</p>
+    <button class="btn big" data-act="login"><svg><use href="#i-google"/></svg>Entrar com o Google</button>
+    <div class="login-hint"><svg><use href="#i-info"/></svg><span>Se aparecer “O Google não verificou este app”, toque em <b>Avançado</b> e depois em <b>Acessar</b>. É normal: o app é só da família.</span></div>
   </div>`;
 }
 
-const sign = v => (num(v) < 0 ? "neg" : "pos");
+/* ---------- peças visuais ---------- */
+const ICONS = [
+  [/LUZ|ENEL|LIGHT|ENERGIA/, "bolt", "#f59f00"], [/G[ÁA]S|NATURGY|COMG[ÁA]S/, "flame", "#f76707"],
+  [/CONDOM/, "building", "#5c7cfa"], [/NET|CLARO|INTERNET|VIVO|TIM|OI\b|TELEFONE/, "wifi", "#15aabf"],
+  [/IPTU|CASA|ALUGUEL/, "house", "#2b8a3e"], [/INSS|SEGURO|PREVID/, "shield", "#7048e8"],
+  [/REM[ÉE]DIO|FARM/, "pill", "#e64980"], [/NETFLIX|SPOTIFY|APPLE|IQIYI|STREAM/, "play", "#e03131"],
+  [/MESADA/, "gift", "#d6336c"], [/OBRA|PISCINA/, "tools", "#868e96"],
+  [/MARIA|DANIEL|FAXINEIRA|DIARISTA/, "user", "#1c7ed6"],
+];
+function contaIcon(nome) {
+  const n = String(nome || "").toUpperCase();
+  for (const [re, ic, cor] of ICONS) if (re.test(n)) return { ic, cor };
+  return { ic: "coin", cor: "#2f9e44" };
+}
+const icoBubble = nome => { const { ic, cor } = contaIcon(nome); return `<span class="ico" style="--ic:${cor}"><svg><use href="#i-${ic}"/></svg></span>`; };
+const cardStyle = nome => { const b = brand(nome); return `--c1:${b.c1};--c2:${b.c2};--fg:${b.fg}`; };
+const miniCard = nome => `<span class="mini" style="${cardStyle(nome)}"><i></i></span>`;
+const diasAte = serial => (typeof serial === "number" ? serial - todaySerial() : null);
+function dueBadge(serial) {
+  const d = diasAte(serial);
+  if (d === null || d < 0 || d > 5) return "";
+  if (d === 0) return `<span class="due today">vence hoje</span>`;
+  if (d === 1) return `<span class="due soon">vence amanhã</span>`;
+  return `<span class="due soon">em ${d} dias</span>`;
+}
+const saideLabel = s => (s === "1º DINHEIRO" ? "1º dinheiro" : s === "2º DINHEIRO" ? "2º dinheiro" : s === "NO CARTÃO" ? "no cartão" : "sem “paga com”");
+const saideChip = s => `<span class="src ${s === "1º DINHEIRO" ? "s1" : s === "2º DINHEIRO" ? "s2" : "s0"}">${esc(saideLabel(s))}</span>`;
+const secHead = (titulo, sub, cor) => `<div class="sec"><span class="sec-dot" style="background:${cor}"></span><div><h2>${esc(titulo)}</h2>${sub ? `<p>${sub}</p>` : ""}</div></div>`;
+const mesCurto = () => (S.m && S.m.cur ? titleCase(S.m.cur.nome).split(" ")[0].toLowerCase() : "");
+
 function viewInicio() {
   const m = S.m;
-  const fat = m.faturas.map(f => {
-    const b = brand(f.nome);
-    return `<button class="row" data-act="open-card" data-card="${esc(f.nome)}">
-      <span class="main"><span class="pill" style="background:${b.bg};color:${b.fg}">${esc(f.nome)}</span><span class="s">vence ${esc(fmtDate(f.venc, "dow"))} · ${f.saide === "2º DINHEIRO" ? "2º dinheiro" : f.saide === "1º DINHEIRO" ? "1º dinheiro" : esc(titleCase(f.saide))}</span></span>
-      <span class="amt">${brl(f.valor)}</span></button>`;
-  }).join("");
+  const neg = num(m.sobraFinal) < 0;
+  const totFat = m.faturas.reduce((a, f) => a + num(f.valor), 0);
+  const fat = [...m.faturas].sort((a, b) => num(a.venc) - num(b.venc)).map(f => `
+    <button class="item" data-act="open-card" data-card="${esc(f.nome)}">
+      ${miniCard(f.nome)}
+      <span class="item-main"><span class="item-t">${esc(titleCase(f.nome))} ${dueBadge(f.venc)}</span>
+        <span class="item-s">vence ${esc(fmtDate(f.venc, "dow"))} · ${saideChip(f.saide)}</span></span>
+      <span class="item-v">${brl(f.valor)}</span>
+    </button>`).join("");
   return `
-    <div class="card hero ${num(m.sobraFinal) < 0 ? "hero-neg" : "hero-pos"}">
-      <div class="lbl">${num(m.sobraFinal) < 0 ? "FALTA no fim do mês" : "SOBRA FINAL DO MÊS"}</div>
-      <div class="big">${brl(m.sobraFinal)}</div>
-      <div class="sub">2º dinheiro + o que sobrou do 1º − as contas do 2º</div>
-    </div>
-    <div class="duo">
-      <div class="card"><div class="lbl">Sobra do 1º dinheiro</div><div class="val ${num(m.sobra1) < 0 ? "neg" : ""}">${brl(m.sobra1)}</div></div>
-      <div class="card yel"><div class="lbl">Livre p/ gastar no cartão</div><div class="val ${num(m.previsto) < 0 ? "neg" : ""}">${brl(m.previsto)}</div></div>
-    </div>
-    ${m.alerta ? `<p class="note" style="color:var(--bad);font-weight:700">${esc(m.alerta)}</p>` : ""}
-    <h2 class="band b-grey">Faturas dos cartões</h2>
-    <div class="card rows">${fat || `<div class="empty">Nenhuma fatura.</div>`}
-      <div class="row total"><span class="main"><span class="t">Total das faturas</span></span><span class="amt">${brl(m.faturas.reduce((a, f) => a + num(f.valor), 0))}</span></div>
-    </div>
-    <h2 class="band b-cream">Contas do mês</h2>
-    <div class="card rows">
-      <button class="row" data-act="tab" data-tab="contas"><span class="main"><span class="t">Contas fixas</span><span class="s">${m.fixas.filter(f => f.nome).length} contas</span></span><span class="amt">${brl(m.totalFixas)}</span></button>
-      <button class="row" data-act="tab" data-tab="contas"><span class="main"><span class="t">Entrou no mês</span><span class="s">1º + 2º dinheiro</span></span><span class="amt">${brl(m.totalEntrou)}</span></button>
+    <section class="hero ${neg ? "neg" : ""}">
+      <div class="hero-lbl">${neg ? "Vai faltar no fim do mês" : "Sobra final do mês"}</div>
+      <div class="hero-big">${brl(m.sobraFinal)}</div>
+      <div class="hero-sub">2º dinheiro + o que sobrou do 1º, menos as contas do 2º</div>
+      <div class="hero-row">
+        <div><span>Sobra do 1º dinheiro</span><b>${brl(m.sobra1)}</b></div>
+        <div><span>Entrou no mês</span><b>${brl(m.totalEntrou)}</b></div>
+      </div>
+    </section>
+    <button class="free" data-act="tab" data-tab="contas">
+      <span class="free-ic"><svg><use href="#i-card"/></svg></span>
+      <span><span class="free-l">Livre para gastar no cartão</span><span class="free-v ${num(m.previsto) < 0 ? "neg" : ""}">${brl(m.previsto)}</span></span>
+    </button>
+    ${m.alerta ? `<div class="alert"><svg><use href="#i-info"/></svg>${esc(m.alerta)}</div>` : ""}
+    ${secHead("Faturas dos cartões", `${m.faturas.length} cartões · total ${brl(totFat)}`, "#5c7cfa")}
+    <div class="list">${fat || `<div class="empty">Nenhuma fatura.</div>`}</div>
+    ${secHead("Contas do mês", "", "#f59f00")}
+    <div class="list">
+      <button class="item" data-act="tab" data-tab="contas">${icoBubble("CASA")}<span class="item-main"><span class="item-t">Contas fixas</span><span class="item-s">${m.fixas.filter(f => f.nome).length} contas · luz, gás, condomínio…</span></span><span class="item-v">${brl(m.totalFixas)}</span></button>
     </div>`;
 }
 
+function ccHtml(c, big) {
+  return `<button class="cc ${big ? "cc-big" : ""}" data-act="open-card" data-card="${esc(c.nome)}" style="${cardStyle(c.nome)}">
+    <span class="cc-top"><span class="cc-name">${esc(titleCase(c.nome))}</span><svg class="cc-wave"><use href="#i-wave"/></svg></span>
+    <span class="cc-chip"></span>
+    <span class="cc-lbl">Fatura de ${esc(mesCurto())}</span>
+    <span class="cc-val">${brl(c.fatura)}</span>
+    <span class="cc-bot"><span>${c.final && c.final !== "—" ? "•••• " + esc(c.final) : "&nbsp;"}</span><span>vence ${esc(fmtDate(c.venc, "dow"))}</span></span>
+  </button>`;
+}
 function viewCartoes() {
   const m = S.m;
-  const tiles = m.cartoes.map(c => {
-    const b = brand(c.nome);
-    return `<button class="tile" data-act="open-card" data-card="${esc(c.nome)}" style="background:${b.bg};color:${b.fg}">
-      <span class="n">${esc(titleCase(c.nome))}</span>
-      <span><span class="v">${brl(c.fatura)}</span><br><span class="h">vence ${esc(fmtDate(c.venc, "dow"))}</span></span>
-    </button>`;
-  }).join("");
-  return `<div class="grid">${tiles}</div>
-    <p class="note">Toque num cartão para ver as compras. O valor é a fatura de ${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}.</p>`;
+  const tot = m.cartoes.reduce((a, c) => a + num(c.fatura), 0);
+  return `${secHead("Meus cartões", `Toque num cartão para ver as compras · total ${brl(tot)}`, "#5c7cfa")}
+    <div class="wallet">${m.cartoes.map(c => ccHtml(c)).join("")}</div>`;
 }
 
+function parcInfo(it) {
+  if (!/^P \d+\/\d+$/.test(it.sit)) return null;
+  const [a, b] = it.sit.slice(2).split("/").map(Number);
+  return { a, b };
+}
 function itemClass(it) {
   if (it.sit === "FIXO") return "fixo";
-  if (/^P \d+\/\d+$/.test(it.sit)) { const [a, b] = it.sit.slice(2).split("/").map(Number); return a === b ? "ultima" : "parc"; }
+  const p = parcInfo(it); if (p) return p.a === p.b ? "ultima" : "parc";
   if (it.sit === "ACABOU" || it.sit === "FUTURA") return "muted";
-  return "";
+  if (it.sit === "ESCOLHA A 1ª FATURA") return "warn";
+  return "vista";
 }
 function sitLabel(it) {
-  if (/^P \d+\/\d+$/.test(it.sit)) { const [a, b] = it.sit.slice(2).split("/"); return a === b ? `ÚLTIMA ${a}/${b}` : `PARCELA ${a}/${b}`; }
+  const p = parcInfo(it);
+  if (p) return p.a === p.b ? `ÚLTIMA ${p.a}/${p.b}` : `PARCELA ${p.a}/${p.b}`;
   return { "FIXO": "TODO MÊS", "À VISTA": "À VISTA", "ACABOU": "JÁ ACABOU", "FUTURA": "FATURA FUTURA", "ESCOLHA A 1ª FATURA": "FALTA A FATURA" }[it.sit] || it.sit;
+}
+function compraHtml(it) {
+  const p = parcInfo(it);
+  return `<button class="buy ${itemClass(it)}" data-act="edit-compra" data-row="${it.row}">
+    <span class="buy-main">
+      <span class="buy-t">${esc(it.nome || "(sem nome)")}</span>
+      <span class="buy-s"><span class="tag">${esc(sitLabel(it))}</span>${it.data !== "" ? `<span class="buy-d">${esc(fmtDate(it.data, "short"))}</span>` : ""}</span>
+      ${p ? `<span class="bar"><i style="width:${Math.round(p.a / p.b * 100)}%"></i></span>` : ""}
+    </span>
+    <span class="buy-v">${brl(it.valor)}${p && p.b > p.a ? `<small>faltam ${p.b - p.a}× · ${brl(num(it.valor) * (p.b - p.a))}</small>` : ""}</span>
+  </button>`;
 }
 function viewCartao() {
   const m = S.m, c = m.cartoes.find(x => x.nome === S.card);
   if (!c) { S.tab = "cartoes"; return viewCartoes(); }
-  const b = brand(c.nome), listas = m.listas.filter(l => l.card === c.nome);
+  const listas = m.listas.filter(l => l.card === c.nome);
   const hoje = monthByLabel(c.hoje);
+  const cor = brand(c.nome).c1;
   const blocos = listas.map(l => {
     const itens = l.itens.filter(it => it.nome || it.valor !== "");
     const ativos = itens.filter(it => num(it.noMes) > 0 || it.sit === "ESCOLHA A 1ª FATURA");
-    const outros = itens.filter(it => !ativos.includes(it));
-    const linha = it => `<button class="row ${itemClass(it)}" data-act="edit-compra" data-row="${it.row}">
-        <span class="main"><span class="t">${esc(it.nome || "(sem nome)")}</span><span class="s"><span class="tag">${esc(sitLabel(it))}</span>${it.data !== "" ? " " + esc(fmtDate(it.data, "short")) : ""}</span></span>
-        <span class="amt">${brl(it.valor)}</span></button>`;
+    const futuras = itens.filter(it => it.sit === "FUTURA");
     const proj = m.proj.linhas[l.nome] || m.proj.linhas[Object.keys(m.proj.linhas).find(k => k.startsWith(l.nome)) || ""];
-    return `${listas.length > 1 ? `<h2 class="band b-grey">${esc(l.label)}</h2>` : `<h2 class="band b-grey">Compras desta fatura</h2>`}
-      <div class="card rows">${ativos.map(linha).join("") || `<div class="empty">Nenhuma compra nesta fatura.</div>`}
-        <div class="row total"><span class="main"><span class="t">Total</span></span><span class="amt">${brl(l.total)}</span></div></div>
-      ${proj ? `<h2 class="band b-cream">Próximos meses (já comprometido)</h2><div class="proj">${m.proj.meses.slice(1).map((mes, i) => `<div><b>${esc(mes)}</b><span>${brl(proj[i + 1])}</span></div>`).join("")}</div>` : ""}
-      ${outros.length ? `<h2 class="band b-grey">Outras compras da lista</h2><div class="card rows">${outros.map(linha).join("")}</div>` : ""}`;
+    const prox = proj ? proj.slice(1).map((v, i) => ({ v: num(v), mes: m.proj.meses[i + 1] })).filter(x => x.v > 0) : [];
+    const maxP = Math.max(1, ...prox.map(x => x.v));
+    return `${secHead(listas.length > 1 ? l.label : "Compras desta fatura", `${ativos.length} compras · total ${brl(l.total)}`, cor)}
+      <div class="list">${ativos.map(compraHtml).join("") || `<div class="empty">Nenhuma compra nesta fatura.</div>`}</div>
+      ${prox.length ? `${secHead("Próximas faturas", "o que já está comprometido", "#f59f00")}
+        <div class="months">${prox.map(x => `<div class="mo"><span class="mo-bar"><i style="height:${Math.max(8, Math.round(x.v / maxP * 100))}%;--c1:${cor}"></i></span><b>${brl(x.v).replace("R$", "").trim()}</b><span>${esc(x.mes)}</span></div>`).join("")}</div>` : ""}
+      ${futuras.length ? `${secHead("Já lançadas para depois", "", "#868e96")}<div class="list">${futuras.map(compraHtml).join("")}</div>` : ""}`;
   }).join("");
-  return `<div class="card card-head" style="background:${b.bg};color:${b.fg};margin-top:12px">
-      <div class="n">${esc(titleCase(c.nome))}${c.final && c.final !== "—" ? ` · final ${esc(c.final)}` : ""}</div>
-      <div class="meta">Vence ${esc(fmtDate(c.venc, "dow"))} · melhor dia de compra: ${c.melhor}</div>
-      <div class="v">${brl(c.fatura)}</div>
-      <div class="meta">Compra de hoje entra na fatura de <b>${esc(hoje ? titleCase(hoje.nome) : c.hoje)}</b></div>
+  return `<button class="back" data-act="tab" data-tab="cartoes"><svg><use href="#i-left"/></svg>Todos os cartões</button>
+    <div class="cc-solo">${ccHtml(c, true)}</div>
+    <div class="facts">
+      <div><span>Vence</span><b>${esc(fmtDate(c.venc, "dow"))}</b></div>
+      <div><span>Melhor dia</span><b>dia ${c.melhor}</b></div>
+      <div><span>Compra hoje cai em</span><b>${esc(hoje ? titleCase(hoje.nome).split(" ")[0] : c.hoje)}</b></div>
     </div>
-    <div class="stack"><button class="btn" data-act="nova-compra" data-card="${esc(c.nome)}"><svg><use href="#i-plus"/></svg>Lançar compra neste cartão</button></div>
+    <button class="btn" data-act="nova-compra" data-card="${esc(c.nome)}"><svg><use href="#i-plus"/></svg>Lançar compra neste cartão</button>
     ${blocos}
-    <div class="legend"><span><i style="background:var(--parc)"></i>parcelado</span><span><i style="background:var(--ultima)"></i>última parcela</span><span><i style="background:var(--fixo)"></i>todo mês</span></div>
-    <div class="stack"><button class="btn ghost" data-act="edit-cartao" data-card="${esc(c.nome)}">Mudar melhor dia ou vencimento</button>
-    <button class="btn ghost" data-act="tab" data-tab="cartoes">Voltar para os cartões</button></div>`;
+    <div class="legend"><span><i class="lg parc"></i>parcelado</span><span><i class="lg ultima"></i>última parcela</span><span><i class="lg fixo"></i>todo mês</span><span><i class="lg vista"></i>à vista</span></div>
+    <button class="btn ghost" data-act="edit-cartao" data-card="${esc(c.nome)}">Mudar melhor dia ou vencimento</button>`;
 }
 
-const saideLabel = s => (s === "1º DINHEIRO" ? "1º dinheiro" : s === "2º DINHEIRO" ? "2º dinheiro" : s === "NO CARTÃO" ? "no cartão" : "sem “sai de”");
 function viewContas() {
   const m = S.m;
-  const ent = m.entradas.filter(e => e.principal || e.nome || e.valor !== "").map(e => `<button class="row" data-act="edit-entrada" data-row="${e.row}">
-      <span class="main"><span class="t">${esc(e.principal ? (e.row - m.ranges.rEnt === 1 ? "1º dinheiro" : "2º dinheiro – para cartões") : e.nome)}</span>
-      <span class="s">${e.principal ? "dia " + esc(fmtDate(e.data, "short")) : "entra junto com o 2º"}</span></span>
-      <span class="amt">${brl(e.valor)}</span></button>`).join("");
+  const ent = m.entradas.filter(e => e.principal || e.nome || e.valor !== "").map(e => {
+    const primeiro = e.row - m.ranges.rEnt === 1;
+    const nome = e.principal ? (primeiro ? "1º dinheiro" : "2º dinheiro") : e.nome;
+    const sub = e.principal ? `${primeiro ? "chega no fim do mês" : "para os cartões"} · dia ${esc(fmtDate(e.data, "short"))}` : "entra junto com o 2º";
+    return `<button class="item" data-act="edit-entrada" data-row="${e.row}">
+      <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
+      <span class="item-main"><span class="item-t">${esc(nome)}</span><span class="item-s">${sub}</span></span>
+      <span class="item-v pos">${brl(e.valor)}</span></button>`;
+  }).join("");
   const livreOutro = m.entradas.some(e => !e.principal && !e.nome && e.valor === "");
-  const fix = m.fixas.filter(f => f.nome || f.valor !== "").sort((a, b) => num(a.dia) - num(b.dia)).map(f => `<button class="row" data-act="edit-fixa" data-row="${f.row}">
-      <span class="main"><span class="t">${esc(f.nome)}</span><span class="s">dia ${esc(f.dia)} · ${esc(saideLabel(f.saide))}${f.onde ? " · " + esc(f.onde) : ""}</span></span>
-      <span class="amt">${brl(f.valor)}</span></button>`).join("");
-  return `<h2 class="band b-cyan">Dinheiro que entrou</h2>
-    <div class="card rows">${ent}
-      <div class="row total"><span class="main"><span class="t">Total (1º + 2º)</span></span><span class="amt">${brl(m.totalEntrou)}</span></div></div>
-    ${livreOutro ? `<div class="stack"><button class="btn ghost" data-act="nova-entrada">+ Outro valor (ex.: saldo do Inter)</button></div>` : ""}
-    <h2 class="band b-cream">Contas fixas</h2>
-    <div class="card rows">${fix || `<div class="empty">Nenhuma conta.</div>`}
-      <div class="row total"><span class="main"><span class="t">Total (sem as do cartão)</span></span><span class="amt">${brl(m.totalFixas)}</span></div></div>
-    <div class="stack"><button class="btn ghost" data-act="nova-fixa">+ Nova conta</button></div>
-    <h2 class="band b-green">Resultado do mês</h2>
-    <div class="card rows">
-      <div class="row"><span class="main"><span class="t">Sobra do 1º dinheiro</span><span class="s">passa para o 2º</span></span><span class="amt">${brl(m.sobra1)}</span></div>
-      <div class="row total"><span class="main"><span class="t">Sobra final do mês</span></span><span class="amt" style="color:${num(m.sobraFinal) < 0 ? "var(--bad)" : "var(--good)"}">${brl(m.sobraFinal)}</span></div>
-      <div class="row"><span class="main"><span class="t">Livre p/ gastar no cartão</span><span class="s">previsto no começo do mês</span></span><span class="amt">${brl(m.previsto)}</span></div>
+  const fix = m.fixas.filter(f => f.nome || f.valor !== "").sort((a, b) => num(a.dia) - num(b.dia)).map(f => `<button class="item ${f.saide === "NO CARTÃO" ? "dim" : ""}" data-act="edit-fixa" data-row="${f.row}">
+      ${icoBubble(f.nome)}
+      <span class="item-main"><span class="item-t">${esc(f.nome)}</span><span class="item-s">dia ${esc(f.dia)} · ${saideChip(f.saide)}${f.onde ? ` · ${esc(f.onde)}` : ""}</span></span>
+      <span class="item-v">${brl(f.valor)}</span></button>`).join("");
+  const neg = num(m.sobraFinal) < 0;
+  return `${secHead("Dinheiro que entrou", `total ${brl(m.totalEntrou)}`, "#2f9e44")}
+    <div class="list">${ent}</div>
+    ${livreOutro ? `<button class="btn ghost" data-act="nova-entrada"><svg><use href="#i-plus"/></svg>Outro valor (ex.: saldo do Inter)</button>` : ""}
+    ${secHead("Contas fixas", `total ${brl(m.totalFixas)} · sem as que vêm no cartão`, "#f59f00")}
+    <div class="list">${fix || `<div class="empty">Nenhuma conta.</div>`}</div>
+    <button class="btn ghost" data-act="nova-fixa"><svg><use href="#i-plus"/></svg>Nova conta</button>
+    ${secHead("Resultado do mês", "", "#2f9e44")}
+    <div class="result">
+      <div><span>Sobra do 1º dinheiro</span><b>${brl(m.sobra1)}</b><small>passa para o 2º</small></div>
+      <div class="${neg ? "neg" : "pos"}"><span>${neg ? "Falta no fim do mês" : "Sobra final do mês"}</span><b>${brl(m.sobraFinal)}</b></div>
+      <div class="yel"><span>Livre p/ gastar no cartão</span><b>${brl(m.previsto)}</b><small>previsto no começo do mês</small></div>
     </div>`;
 }
 
 function viewMais() {
   const m = S.m, c = m.carlos;
-  const ex = c.extras.filter(x => x.nome || x.valor !== "").map(x => `<button class="row" data-act="edit-carlos" data-row="${x.row}">
-      <span class="main"><span class="t">${esc(x.nome)}</span></span><span class="amt">${brl(x.valor)}</span></button>`).join("");
-  const pq = m.porquinho.filter(p => p.data !== "" || p.inter !== "" || p.mp !== "").map(p => `<button class="row" data-act="edit-porquinho" data-row="${p.row}">
-      <span class="main"><span class="t">${p.data !== "" ? esc(fmtDate(p.data)) : "sem data"}</span><span class="s">Inter ${brl(p.inter)} · Merc. Pago ${brl(p.mp)}${p.obs ? " · " + esc(p.obs) : ""}</span></span>
-      <span class="amt">${brl(p.total)}${p.dif !== "" ? `<small style="color:${num(p.dif) < 0 ? "var(--bad)" : "var(--good)"}">${num(p.dif) >= 0 ? "+" : ""}${brl(p.dif)}</small>` : ""}</span></button>`).join("");
+  const ex = c.extras.filter(x => x.nome || x.valor !== "").map(x => `<button class="item" data-act="edit-carlos" data-row="${x.row}">
+      ${icoBubble(x.nome)}<span class="item-main"><span class="item-t">${esc(x.nome)}</span></span><span class="item-v">${brl(x.valor)}</span></button>`).join("");
+  const pqRows = m.porquinho.filter(p => p.data !== "" || p.inter !== "" || p.mp !== "");
+  const ult = pqRows[pqRows.length - 1];
+  const pq = [...pqRows].reverse().map(p => `<button class="item" data-act="edit-porquinho" data-row="${p.row}">
+      <span class="ico" style="--ic:#e64980"><svg><use href="#i-piggy"/></svg></span>
+      <span class="item-main"><span class="item-t">${p.data !== "" ? esc(fmtDate(p.data)) : "sem data"}</span><span class="item-s">Inter ${brl(p.inter)} · Merc. Pago ${brl(p.mp)}${p.obs ? ` · ${esc(p.obs)}` : ""}</span></span>
+      <span class="item-v">${brl(p.total)}${p.dif !== "" ? `<small class="${num(p.dif) < 0 ? "neg" : "pos"}">${num(p.dif) >= 0 ? "▲ " : "▼ "}${brl(Math.abs(num(p.dif)))}</small>` : ""}</span></button>`).join("");
   const email = store.get("email");
-  return `<h2 class="band b-green">Carlos – ${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</h2>
-    <div class="card rows">
-      <button class="row" data-act="edit-carlos-mensal"><span class="main"><span class="t">Mensal</span></span><span class="amt">${brl(c.mensal)}</span></button>
+  const difOk = Math.abs(num(c.dif)) < 0.01;
+  return `${secHead("Carlos", esc(m.cur ? titleCase(m.cur.nome) : m.mes), "#2f9e44")}
+    <div class="carlos"><span>Total do Carlos</span><b>${brl(c.total)}</b>
+      <small class="${difOk ? "pos" : "neg"}">${difOk ? "bate com o que entrou" : `diferença de ${brl(c.dif)} para o que entrou (${brl(c.entrou)})`}</small></div>
+    <div class="list">
+      <button class="item" data-act="edit-carlos-mensal"><span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span><span class="item-main"><span class="item-t">Mensal</span></span><span class="item-v">${brl(c.mensal)}</span></button>
       ${ex}
-      <div class="row"><span class="main"><span class="t">Nubank do Carlos</span><span class="s">vem sozinho da lista do Nubank</span></span><span class="amt">${brl(c.nubank)}</span></div>
-      <div class="row total"><span class="main"><span class="t">Total do Carlos</span></span><span class="amt">${brl(c.total)}</span></div>
-      <div class="row"><span class="main"><span class="t">Diferença p/ o que entrou</span><span class="s">entrou ${brl(c.entrou)}</span></span><span class="amt" style="color:${Math.abs(num(c.dif)) >= 0.01 ? "var(--bad)" : "inherit"}">${brl(c.dif)}</span></div>
+      <div class="item">${miniCard("NUBANK")}<span class="item-main"><span class="item-t">Nubank do Carlos</span><span class="item-s">vem sozinho da lista do Nubank</span></span><span class="item-v">${brl(c.nubank)}</span></div>
     </div>
-    <div class="stack"><button class="btn ghost" data-act="novo-carlos">+ Novo valor do Carlos</button></div>
+    <button class="btn ghost" data-act="novo-carlos"><svg><use href="#i-plus"/></svg>Novo valor do Carlos</button>
 
-    <h2 class="band b-pink">Porquinho (investimentos)</h2>
-    <div class="card rows">${pq || `<div class="empty">Nada anotado.</div>`}</div>
-    <div class="stack"><button class="btn ghost" data-act="novo-porquinho">+ Anotar saldo de hoje</button></div>
+    ${secHead("Porquinho", ult ? `último saldo: ${brl(ult.total)}` : "quanto tem investido", "#e64980")}
+    <div class="list">${pq || `<div class="empty">Nada anotado.</div>`}</div>
+    <button class="btn ghost" data-act="novo-porquinho"><svg><use href="#i-plus"/></svg>Anotar saldo de hoje</button>
 
-    <h2 class="band b-grey">Fim do mês</h2>
-    <div class="card" style="padding:16px">
-      <p style="margin:0 0 12px;color:var(--ink-2)">Quando tudo do mês estiver pago: guarda o mês em ANTERIORES, tira das listas as compras que já acabaram e passa para o mês seguinte.</p>
+    ${secHead("Fim do mês", "", "#5c7cfa")}
+    <div class="endmonth">
+      <span class="ico" style="--ic:#5c7cfa"><svg><use href="#i-calendar"/></svg></span>
+      <p>Quando tudo do mês estiver pago: guarda o mês em ANTERIORES, tira as compras que já acabaram e passa para o mês seguinte.</p>
       <button class="btn" data-act="fechar">Fechar ${esc(m.cur ? titleCase(m.cur.nome) : "o mês")}</button>
     </div>
 
-    <h2 class="band b-grey">Planilha e conta</h2>
-    <div class="stack">
-      <a class="btn ghost" href="https://docs.google.com/spreadsheets/d/${esc(CFG.SPREADSHEET_ID)}/edit" target="_blank" rel="noopener" style="text-decoration:none">Abrir a planilha no Google</a>
-      <button class="btn ghost" data-act="logout">Sair da conta${email ? ` (${esc(email)})` : ""}</button>
-    </div>
-    <p class="note" style="text-align:center">Casa · versão ${esc(APP_VERSION)}</p>`;
+    ${secHead("Planilha e conta", email ? esc(email) : "", "#868e96")}
+    <a class="btn ghost" href="https://docs.google.com/spreadsheets/d/${esc(CFG.SPREADSHEET_ID)}/edit" target="_blank" rel="noopener">Abrir a planilha no Google</a>
+    <button class="btn ghost" data-act="logout">Sair da conta</button>
+    <p class="ver">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
-const APP_VERSION = "3";
+const APP_VERSION = "4";
 
 /* ======================= folhas (formulários) ======================= */
 function openSheet(title, body, onMount) {
