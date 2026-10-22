@@ -63,8 +63,10 @@ const Token = {
   set(tok, secs) { store.set("token", { access_token: tok, exp: Date.now() + (Number(secs) || 3600) * 1000 - 60000 }); },
   clear() { store.del("token"); },
 };
-function googleLogin() {
+// silent = tenta renovar sem nenhum toque (o Google já conhece a pessoa); se precisar de algo, volta e mostra o botão.
+function googleLogin(silent) {
   if (DEMO) return;
+  if (silent === true) store.set("silentTry", Date.now()); else store.del("silentTry");
   const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
   store.set("oauthState", state);
   const p = new URLSearchParams({
@@ -73,6 +75,7 @@ function googleLogin() {
   });
   const email = store.get("email");
   if (email) p.set("login_hint", email);
+  if (silent === true) p.set("prompt", "none");
   location.assign("https://accounts.google.com/o/oauth2/v2/auth?" + p.toString());
 }
 function handleOAuthReturn() {
@@ -82,7 +85,10 @@ function handleOAuthReturn() {
   const expected = store.get("oauthState");
   store.del("oauthState");
   history.replaceState(null, "", baseUrl());
-  if (p.get("error")) return p.get("error") === "access_denied" ? "Entrada cancelada." : "O Google recusou a entrada. Tente de novo.";
+  if (p.get("error")) {
+    if (/interaction_required|login_required|consent_required|account_selection_required/.test(p.get("error"))) return "silent-fail";
+    return p.get("error") === "access_denied" ? "Entrada cancelada." : "O Google recusou a entrada. Tente de novo.";
+  }
   if (!expected || p.get("state") !== expected) return "Não deu para confirmar a entrada. Tente de novo.";
   if (!(p.get("scope") || "").includes("spreadsheets")) return "Na tela do Google, deixe marcada a permissão das Planilhas Google.";
   Token.set(p.get("access_token"), p.get("expires_in"));
@@ -330,8 +336,12 @@ const OPS = {
 };
 
 // Executa uma operação. Se o login expirou, guarda a operação e volta a fazê-la depois de entrar de novo.
+// Renova o login sozinho, sem toque, no máximo uma tentativa a cada 2 minutos (evita ficar em loop).
+const canSilent = () => !!store.get("email") && Date.now() - (store.get("silentTry") || 0) > 120000;
+function relogin() { if (canSilent()) googleLogin(true); else googleLogin(); }
+
 async function run(op, args, { busyText = "Salvando…" } = {}) {
-  if (!DEMO && !Token.get()) { store.set("pending", { op, args }); toast("Entrando no Google…"); googleLogin(); return false; }
+  if (!DEMO && !Token.get()) { store.set("pending", { op, args }); toast("Conectando ao Google…"); relogin(); return false; }
   busy(busyText);
   try {
     const msg = await OPS[op](args);
@@ -340,7 +350,7 @@ async function run(op, args, { busyText = "Salvando…" } = {}) {
     if (msg) toast(msg);
     return true;
   } catch (e) {
-    if (e instanceof AuthError) { store.set("pending", { op, args }); googleLogin(); return false; }
+    if (e instanceof AuthError) { store.set("pending", { op, args }); relogin(); return false; }
     toast(e.message || "Não deu certo. Tente de novo.", true);
     refresh({ quiet: true });
     return false;
@@ -427,7 +437,7 @@ function renderBanner() {
   const b = $("#banner");
   if (!DEMO && !Token.get() && S.m) {
     b.innerHTML = `<span>Mostrando os últimos valores guardados. Entre de novo para atualizar.</span><button id="relogin">Entrar</button>`;
-    b.hidden = false; $("#relogin").onclick = googleLogin;
+    b.hidden = false; $("#relogin").onclick = () => googleLogin();
   } else b.hidden = true;
 }
 function renderStatus() {
@@ -610,7 +620,7 @@ function viewMais() {
     </div>
     <p class="note" style="text-align:center">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
-const APP_VERSION = "1";
+const APP_VERSION = "2";
 
 /* ======================= folhas (formulários) ======================= */
 function openSheet(title, body, onMount) {
@@ -902,10 +912,12 @@ const Demo = {
 /* ======================= início ======================= */
 (async () => {
   const oauth = handleOAuthReturn();
+  // login venceu (dura ~1 h): renova sozinho antes de mostrar qualquer botão
+  if (!DEMO && !oauth && !Token.get() && canSilent()) { googleLogin(true); return; }
   const cache = store.get("cache");
   if (cache && cache.g) { try { S.m = parse(cache.g); S.at = cache.at; } catch (e) {} }
   renderBanner(); render();
-  if (oauth && oauth !== "ok") toast(oauth, true);
+  if (oauth && oauth !== "ok" && oauth !== "silent-fail") toast(oauth, true);
   if (oauth === "ok") await fetchEmail();
   if (DEMO || Token.get()) {
     await refresh({ quiet: !!S.m });
