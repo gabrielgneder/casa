@@ -1,0 +1,4 @@
+.DS_Store
+Thumbs.db
+# dados reais da planilha, só para testar no computador — nunca publicar
+demo-grid.json
