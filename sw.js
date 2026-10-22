@@ -1,8 +1,9 @@
 // Service worker: deixa o app abrir sem internet (com os últimos valores guardados).
-// VERSION é trocada pelo hash do commit na publicação (.github/workflows/deploy.yml); o celular baixa os arquivos novos sozinho.
+// VERSION e o carimbo de versão (v=) dos arquivos são trocados pelo hash do commit na publicação (.github/workflows/deploy.yml).
+// O index.html pede app.js?v=<versão>: um HTML novo nunca roda com JS/CSS velho guardado no cache.
 const VERSION = "casa-v7";
 const SHELL = [
-  "./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
+  "./", "index.html", "styles.css?v=dev", "app.js?v=dev", "config.js?v=dev", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
 ];
 
@@ -27,15 +28,16 @@ self.addEventListener("fetch", e => {
   // dados de teste nunca vão para o cache
   if (/\/demo-[^/]*\.json$/.test(url.pathname)) return;
 
-  // Página: tenta a rede primeiro (pega atualizações), cai no cache se estiver offline
+  // Página: tenta a rede primeiro (pega atualizações), cai no cache se estiver offline.
+  // cache "no-cache": sempre confere com o servidor; nunca usa um HTML velho do cache HTTP do navegador.
   if (req.mode === "navigate") {
-    e.respondWith(fetch(req).then(res => { const copy = res.clone(); caches.open(VERSION).then(c => c.put("./", copy)); return res; })
+    e.respondWith(fetch(req, { cache: "no-cache" }).then(res => { const copy = res.clone(); caches.open(VERSION).then(c => c.put("./", copy)); return res; })
       .catch(() => caches.match("./").then(r => r || caches.match("index.html"))));
     return;
   }
 
-  // Demais arquivos do app: cache primeiro
-  e.respondWith(caches.match(req, { ignoreSearch: true }).then(hit => hit || fetch(req).then(res => {
+  // Demais arquivos do app: cache primeiro, pelo endereço exato (com o ?v= da versão)
+  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
     return res;
   })));

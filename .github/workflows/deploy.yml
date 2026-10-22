@@ -47,6 +47,10 @@ jobs:
           sed -i -E "s/^const APP_VERSION = \"[^\"]*\";/const APP_VERSION = \"$SHA\";/" app.js
           grep -q "const VERSION = \"casa-$SHA\";" sw.js || { echo "::error::não achei VERSION em sw.js"; exit 1; }
           grep -q "const APP_VERSION = \"$SHA\";" app.js || { echo "::error::não achei APP_VERSION em app.js"; exit 1; }
+          # o HTML pede os arquivos da mesma versão (app.js?v=SHA): nunca mistura HTML novo com JS velho
+          sed -i "s/?v=dev/?v=$SHA/g" index.html sw.js
+          [ "$(grep -c "?v=$SHA" index.html)" = 3 ] || { echo "::error::index.html deveria pedir 3 arquivos com ?v="; exit 1; }
+          [ "$(grep -o "?v=$SHA" sw.js | wc -l)" = 3 ] || { echo "::error::sw.js deveria guardar 3 arquivos com ?v="; exit 1; }
 
       - name: Montar a pasta publicada
         run: |
@@ -54,7 +58,7 @@ jobs:
           cp index.html styles.css app.js config.js sw.js manifest.webmanifest demo-ficticio.json _site/
           cp -r icons _site/
           # o service worker precisa achar todos os arquivos que ele guarda
-          for f in $(grep -oE '"(icons/)?[a-z0-9.-]+\.(html|css|js|webmanifest|png)"' sw.js | tr -d '"'); do
+          for f in $(grep -oE '"(icons/)?[a-z0-9.-]+\.(html|css|js|webmanifest|png)(\?v=[a-z0-9]+)?"' sw.js | tr -d '"' | sed 's/?v=.*//'); do
             test -f "_site/$f" || { echo "::error::sw.js guarda $f, mas ele não foi publicado"; exit 1; }
           done
 
