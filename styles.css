@@ -383,12 +383,20 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 .sheet-root.open .sheet { transform: none; }
 .sheet .grab { width: 48px; height: 5px; border-radius: 3px; background: var(--grab); margin: 4px auto 12px; }
 .sheet-h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+#sheet-t:focus { outline: none; } /* recebe o foco só para o VoiceOver começar pela folha; não é botão */
 .sheet-h h3 { flex: 1; margin: 0; font-size: 1.45rem; font-weight: 800; letter-spacing: -.01em; }
 .sheet-h .x { width: 46px; height: 46px; border: 0; border-radius: 14px; background: var(--surface); display: grid; place-items: center; box-shadow: var(--shadow-1); }
 
 .field { display: block; margin-top: 18px; }
 .field > span { display: block; font-weight: 800; font-size: .95rem; margin-bottom: 8px; }
 .field small { display: block; color: var(--ink-3); font-size: .82rem; margin-top: 6px; }
+/* erro junto do campo: texto + borda, nunca só a cor */
+.field-err { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--alert-bg); color: var(--alert-ink); font-weight: 700; font-size: .95rem; line-height: 1.35; }
+.field-err::before { content: "!"; flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--bad); color: #fff; font-size: .8rem; font-weight: 900; }
+.stack > .field-err { margin: 12px 0 0; }
+.input[aria-invalid="true"] { border-color: var(--bad); }
+.cardpick:has([aria-invalid="true"]) { outline: 3px solid var(--bad); outline-offset: 4px; border-radius: 16px; }
+.btn:disabled { cursor: progress; }
 .input::placeholder { color: var(--ink-3); opacity: 1; } /* o cinza padrão do navegador não passa no modo noite */
 .input { caret-color: var(--brand); }
 ::selection { background: var(--brand-2); color: var(--ink); }

@@ -366,8 +366,12 @@ const OPS = {
 const canSilent = () => !!store.get("email") && Date.now() - (store.get("silentTry") || 0) > 120000;
 function relogin() { if (canSilent()) googleLogin(true); else googleLogin(); }
 
+// run.erro guarda a última mensagem de erro (a folha mostra ela junto do botão Salvar).
+const SEM_NET = "Sem internet agora. Nada foi salvo ainda.";
 async function run(op, args, { busyText = "Salvando…" } = {}) {
-  if (!DEMO && !Token.get()) { store.set("pending", { op, args }); toast("Conectando ao Google…"); relogin(); return false; }
+  run.erro = null;
+  if (!DEMO && !Token.get()) { store.set("pending", { op, args }); run.erro = "Conectando ao Google…"; toast(run.erro); relogin(); return false; }
+  if (!DEMO && navigator.onLine === false) { run.erro = SEM_NET; toast(SEM_NET, true); return false; }
   busy(busyText);
   try {
     const msg = await OPS[op](args);
@@ -377,7 +381,9 @@ async function run(op, args, { busyText = "Salvando…" } = {}) {
     return true;
   } catch (e) {
     if (e instanceof AuthError) { store.set("pending", { op, args }); relogin(); return false; }
-    toast(e.message || "Não deu certo. Tente de novo.", true);
+    // erro técnico do navegador (ex.: "Failed to fetch") vira português
+    run.erro = e instanceof TypeError ? SEM_NET : (e.message || "Não deu certo. Tente de novo.");
+    toast(run.erro, true);
     refresh({ quiet: true });
     return false;
   } finally { busy(false); }
@@ -468,11 +474,20 @@ function renderBanner() {
   if (DEMO) {
     b.innerHTML = `<span>Modo de teste: dados inventados. Nada do que mexer aqui vai para a planilha.</span><a class="btn-sair" href="./">Sair do teste</a>`;
     b.hidden = false;
+  } else if (navigator.onLine === false && S.m) {
+    b.innerHTML = `<span>Sem internet. Mostrando os últimos valores guardados; para salvar, espere a internet voltar.</span>`;
+    b.hidden = false;
   } else if (!Token.get() && S.m) {
     b.innerHTML = `<span>Mostrando os últimos valores guardados. Entre de novo para atualizar.</span><button id="relogin">Entrar</button>`;
     b.hidden = false; $("#relogin").onclick = () => googleLogin();
+  } else if (foraDoMes()) {
+    // Fechar o mês já deixa a planilha no mês seguinte, então só avisa quando está fora de "este mês ou o próximo"
+    const h = mesDeHoje();
+    b.innerHTML = `<span>A planilha está em <b>${esc(titleCase(S.m.cur.nome))}</b> para todo mundo. Hoje é ${esc(titleCase(h.nome).split(" ")[0].toLowerCase())}.</span><button id="volta-mes">Voltar para ${esc(titleCase(h.nome).split(" ")[0])}</button>`;
+    b.hidden = false; $("#volta-mes").onclick = () => mudaMes(0, h);
   } else b.hidden = true;
 }
+const foraDoMes = () => { const h = mesDeHoje(); return !!(S.m && S.m.cur && h && (S.m.cur.idx < h.idx || S.m.cur.idx > h.idx + 1)); };
 function renderStatus() {
   const el = $(".status"); if (!el) return;
   el.classList.toggle("spin", S.loading);
@@ -489,7 +504,7 @@ function render() {
   $("#mes-nome").textContent = m.cur ? titleCase(m.cur.nome) : m.mes;
   $("#mes-prev").disabled = !m.cur || !monthByIdx(m.cur.idx - 1);
   $("#mes-next").disabled = !m.cur || !monthByIdx(m.cur.idx + 1);
-  $$(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === S.tab));
+  $$(".tabs button").forEach(b => { const on = b.dataset.tab === S.tab || (S.tab === "cartao" && b.dataset.tab === "cartoes"); b.classList.toggle("on", on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); });
   const views = { inicio: viewInicio, cartoes: viewCartoes, contas: viewContas, mais: viewMais, cartao: viewCartao };
   main.innerHTML = (views[S.tab] || viewInicio)() + statusHtml();
   renderStatus();
@@ -730,8 +745,8 @@ function viewMais() {
     </div>
 
     ${secHead("Dia e noite", "cores da tela", "#fab005")}
-    <div class="choices theme-pick">${[["", "i-auto", "Automático"], ["dia", "i-sun", "Dia"], ["noite", "i-moon", "Noite"]].map(([v, ic, l]) =>
-      `<button type="button" class="choice ${(store.get("tema") || "") === v ? "on" : ""}" data-act="tema" data-tema="${v}"><svg><use href="#${ic}"/></svg>${l}</button>`).join("")}</div>
+    <div class="choices theme-pick" role="group" aria-label="Cores da tela">${[["", "i-auto", "Automático"], ["dia", "i-sun", "Dia"], ["noite", "i-moon", "Noite"]].map(([v, ic, l]) =>
+      `<button type="button" ${pressed((store.get("tema") || "") === v)} data-act="tema" data-tema="${v}"><svg><use href="#${ic}"/></svg>${l}</button>`).join("")}</div>
     <p class="ver">Automático segue o iPhone: claro de dia, escuro à noite.</p>
 
     ${secHead("Planilha e conta", email ? esc(email) : "", "#868e96")}
@@ -742,15 +757,76 @@ function viewMais() {
 const APP_VERSION = "7";
 
 /* ======================= folhas (formulários) ======================= */
+// Folha (formulário) por cima do app. Enquanto aberta: o resto fica inerte, o foco fica dentro dela,
+// Esc fecha, e ao fechar o foco volta para o botão que abriu. Tocar fora não fecha se algo foi digitado
+// (só o ✕ fecha sem salvar), para ninguém perder uma compra por um toque sem querer.
+const BEHIND = () => [$(".top"), $("#banner"), $("#main"), $(".tabs"), $("#fab")].filter(Boolean);
+let sheetSeq = 0;
+let pendingReload = false; // versão nova chegou com um formulário aberto
 function openSheet(title, body, onMount) {
-  const root = $("#sheet-root");
-  root.innerHTML = `<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-    <div class="grab"></div><div class="sheet-h"><h3>${esc(title)}</h3><button class="x" aria-label="Fechar"><svg><use href="#i-x"/></svg></button></div>${body}</div>`;
-  requestAnimationFrame(() => root.classList.add("open"));
-  const close = () => { root.classList.remove("open"); setTimeout(() => { if (!root.classList.contains("open")) root.innerHTML = ""; }, 260); };
-  $(".scrim", root).onclick = close; $(".x", root).onclick = close;
-  if (onMount) onMount($(".sheet", root), close);
+  const root = $("#sheet-root"), seq = ++sheetSeq;
+  const opener = root.contains(document.activeElement) ? openSheet.opener : document.activeElement;
+  openSheet.opener = opener;
+  root.innerHTML = `<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-t">
+    <div class="grab"></div><div class="sheet-h"><h3 id="sheet-t" tabindex="-1">${esc(title)}</h3><button class="x" aria-label="Fechar sem salvar"><svg><use href="#i-x"/></svg></button></div>${body}</div>`;
+  const sheet = $(".sheet", root);
+  BEHIND().forEach(e => e.inert = true);
+  $("#sheet-t", sheet).focus({ preventScroll: true }); // o VoiceOver começa pelo título da folha
+  let fechada = false;
+  requestAnimationFrame(() => { if (!fechada && seq === sheetSeq) root.classList.add("open"); }); // não reabre uma folha que já fechou
+  const snap = () => $$("input, select, textarea", sheet).map(i => i.value).join("\u0001");
+  let inicial = ""; // tirada depois que o formulário se preenche sozinho (data, fatura calculada)
+  const close = () => {
+    if (seq !== sheetSeq || fechada) return; // outra folha já tomou o lugar desta
+    fechada = true;
+    root.classList.remove("open");
+    BEHIND().forEach(e => e.inert = false);
+    document.removeEventListener("keydown", onKey, true);
+    if (opener && opener.isConnected) opener.focus({ preventScroll: true });
+    setTimeout(() => { if (!root.classList.contains("open")) { root.innerHTML = ""; if (pendingReload) location.reload(); } }, 260);
+  };
+  const fechaSeLimpo = () => { if (snap() === inicial) close(); else toast("Para sair sem salvar, toque no ✕."); };
+  const onKey = e => {
+    if (seq !== sheetSeq) return document.removeEventListener("keydown", onKey, true);
+    if (e.key === "Escape") { e.preventDefault(); fechaSeLimpo(); }
+    if (e.key === "Tab") { // foco preso dentro da folha
+      const f = $$('button:not([disabled]), input, select, textarea, [tabindex="-1"]#sheet-t', sheet).filter(x => !x.closest("[hidden]"));
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  };
+  document.addEventListener("keydown", onKey, true);
+  $(".scrim", root).onclick = fechaSeLimpo; $(".x", root).onclick = close;
+  if (onMount) onMount(sheet, close);
+  inicial = snap();
   return close;
+}
+// Mensagem de erro do formulário junto do campo que precisa de atenção (e o campo ganha foco).
+function formErr(el, alvo, msg) {
+  $$(".field-err", el).forEach(x => x.remove());
+  $$("[aria-invalid]", el).forEach(x => x.removeAttribute("aria-invalid"));
+  const t = typeof alvo === "string" ? $(alvo, el) : alvo;
+  const box = (t && t.closest(".field")) || $(".stack", el);
+  const p = document.createElement("p"); p.className = "field-err"; p.setAttribute("role", "alert"); p.textContent = msg;
+  if (t) box.append(p); else box.prepend(p); // sem campo: em cima do botão Salvar
+  if (t) { t.setAttribute("aria-invalid", "true"); t.scrollIntoView({ block: "center", behavior: "smooth" }); if (t.focus) t.focus({ preventScroll: true }); }
+  return false;
+}
+// Salvar sem perder o que foi digitado: a folha só fecha quando a planilha confirmar.
+// Se der errado, o botão volta, a mensagem aparece em cima dele e tudo que foi digitado continua lá.
+async function salvarDaFolha(el, close, fazer) {
+  const b = $("#f-ok", el), txt = b.textContent;
+  $$(".field-err", el).forEach(x => x.remove());
+  b.disabled = true; b.textContent = "Salvando…"; el.setAttribute("aria-busy", "true");
+  const ok = await fazer();
+  el.removeAttribute("aria-busy");
+  if (ok) { close(); return true; }
+  if (!el.isConnected) return false; // saiu para entrar no Google: a operação ficou guardada
+  b.disabled = false; b.textContent = txt;
+  formErr(el, null, (run.erro || "Não deu certo.") + " O que você digitou continua aqui: é só tocar em salvar de novo.");
+  b.focus({ preventScroll: true });
+  return false;
 }
 function confirmSheet(title, text, okLabel, danger) {
   return new Promise(res => {
@@ -764,11 +840,12 @@ function confirmSheet(title, text, okLabel, danger) {
     });
   });
 }
-const choiceBtns = (name, opts, cur) => opts.map(([v, l]) => `<button type="button" class="choice ${String(v) === String(cur) ? "on" : ""}" data-${name}="${esc(v)}">${esc(l)}</button>`).join("");
+// Botões de escolha: o marcado tem .on (visual) e aria-pressed (o VoiceOver diz "selecionado").
+const pressed = on => `class="choice ${on ? "on" : ""}" aria-pressed="${on}"`;
+const marca = (lista, b) => lista.forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", String(x === b)); });
+const choiceBtns = (name, opts, cur) => opts.map(([v, l]) => `<button type="button" ${pressed(String(v) === String(cur))} data-${name}="${esc(v)}">${esc(l)}</button>`).join("");
 function bindChoices(el, name, onPick) {
-  $$(`[data-${name}]`, el).forEach(b => b.onclick = () => {
-    $$(`[data-${name}]`, el).forEach(x => x.classList.toggle("on", x === b)); onPick(b.dataset[name]);
-  });
+  $$(`[data-${name}]`, el).forEach(b => b.onclick = () => { marca($$(`[data-${name}]`, el), b); onPick(b.dataset[name]); });
 }
 function monthOptions(sel) {
   const cur = S.m.cur ? S.m.cur.idx : 0;
@@ -790,19 +867,19 @@ function compraSheet({ cardNome, item }) {
   const autoFat = () => { const c = cardOf(); const x = c ? faturaPara(c, dataSerial) : null; return x ? x.label : ""; };
   if (!item && lista) fat = autoFat();
 
-  const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("");
+  const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" aria-pressed="${!!(lista && lista.nome === l.nome)}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("");
   const body = `
-    <div class="field"><span>Cartão</span><div class="cardpick">${pick}</div></div>
+    <div class="field"><span id="g-cartao">Cartão</span><div class="cardpick" role="group" aria-labelledby="g-cartao">${pick}</div></div>
     <label class="field"><span>O que comprou</span><input class="input" id="f-nome" autocomplete="off" autocapitalize="characters" value="${esc(item ? item.nome : "")}" placeholder="ex.: MERCADO"></label>
-    <div class="field"><span>Como pagou</span><div class="choices">${choiceBtns("tipo", [["vista", "À vista"], ["parc", "Parcelado"], ["fixo", "Todo mês"]], tipo)}</div></div>
+    <div class="field"><span id="g-tipo">Como pagou</span><div class="choices" role="group" aria-labelledby="g-tipo">${choiceBtns("tipo", [["vista", "À vista"], ["parc", "Parcelado"], ["fixo", "Todo mês"]], tipo)}</div></div>
     <div class="field" id="parc-box"><span>Quantas parcelas</span>
       <div class="stepper"><button type="button" data-step="-1">−</button><div class="num" id="f-n">${nParc}</div><button type="button" data-step="1">+</button></div></div>
     <label class="field"><span id="lbl-valor">Valor</span><input class="input money" id="f-valor" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(item ? moneyInput(item.valor) : "")}">
       <small id="f-total"></small></label>
     <label class="field"><span>Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
-    <div class="field"><span>Entra na fatura de</span>
+    <div class="field"><span id="g-fat">Entra na fatura de</span>
       <div class="tip" id="f-best"></div>
-      <div class="choices" id="f-fat-opts"></div>
+      <div class="choices" id="f-fat-opts" role="group" aria-labelledby="g-fat"></div>
       <button type="button" class="linkbtn" id="f-fat-mudar">Escolher outro mês</button>
       <select class="input" id="f-fat-sel" hidden>${monthOptions(fat)}</select></div>
     <div class="stack"><button class="btn" id="f-ok">${item ? "Salvar alteração" : "Salvar compra"}</button>
@@ -820,7 +897,7 @@ function compraSheet({ cardNome, item }) {
         ? `<b>Melhor dia de compra do ${esc(titleCase(c.nome))}: dia ${c.melhor}.</b> Comprando em ${esc(fmtDate(dataSerial, "short"))}, a compra cai na fatura de <b>${esc(titleCase(auto.nome).split(" ")[0].toLowerCase())}</b>. Se o banco colocou em outra, é só tocar no mês certo.`
         : "Escolha o cartão lá em cima.";
       const opts = auto ? [-1, 0, 1].map(d => monthByIdx(auto.idx + d)).filter(Boolean) : [];
-      $("#f-fat-opts", el).innerHTML = opts.map(o => `<button type="button" class="choice month ${o.label === fat ? "on" : ""}" data-fat="${esc(o.label)}">${esc(titleCase(o.nome).split(" ")[0])}<small>${o.label === auto.label ? "calculado" : esc(o.nome.split(" ")[1] || "")}</small></button>`).join("");
+      $("#f-fat-opts", el).innerHTML = opts.map(o => `<button type="button" class="choice month ${o.label === fat ? "on" : ""}" aria-pressed="${o.label === fat}" data-fat="${esc(o.label)}">${esc(titleCase(o.nome).split(" ")[0])}<small>${o.label === auto.label ? "calculado" : esc(o.nome.split(" ")[1] || "")}</small></button>`).join("");
       $$("[data-fat]", el).forEach(b => b.onclick = () => { fat = b.dataset.fat; fatManual = fat !== auto.label; upd(); });
       const fora = fat && !opts.some(o => o.label === fat);
       $("#f-fat-sel", el).hidden = !fora && $("#f-fat-sel", el).dataset.open !== "1";
@@ -828,7 +905,7 @@ function compraSheet({ cardNome, item }) {
     };
     $$("[data-lista]", el).forEach(b => b.onclick = () => {
       lista = m.listas.find(l => l.nome === b.dataset.lista);
-      $$("[data-lista]", el).forEach(x => x.classList.toggle("on", x === b));
+      marca($$("[data-lista]", el), b);
       if (!fatManual) fat = autoFat();
       upd();
     });
@@ -842,17 +919,18 @@ function compraSheet({ cardNome, item }) {
     $("#f-ok", el).onclick = async () => {
       const nome = $("#f-nome", el).value.trim().toUpperCase();
       const valor = parseMoney($("#f-valor", el).value);
-      if (!lista) return toast("Escolha o cartão.", true);
-      if (!nome) return toast("Escreva o que comprou.", true);
-      if (!valor || valor <= 0) return toast("Digite o valor, por exemplo 49,90.", true);
-      if (!fat) return toast("Escolha em qual fatura entra.", true);
+      if (!lista) return formErr(el, ".cardpick button", "Escolha o cartão.");
+      if (!nome) return formErr(el, "#f-nome", "Escreva o que comprou.");
+      if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 49,90.");
+      if (!fat) return formErr(el, "#f-fat-opts button, #f-fat-sel", "Escolha em qual fatura entra.");
       const parc = tipo === "fixo" ? "FIXO" : tipo === "parc" ? nParc : "";
       const args = { lista: lista.nome, nome, valor, data: dataSerial, parc, fat };
-      close();
-      if (item && lista.itens.some(i => i.row === item.row)) await run("editCompra", { ...args, row: item.row, antes: item.nome });
-      else if (item) { // trocou de cartão: lança no novo e apaga do antigo
-        if (await run("addCompra", args)) await run("delCompra", { row: item.row, antes: item.nome });
-      } else await run("addCompra", args);
+      if (item && lista.itens.some(i => i.row === item.row)) return salvarDaFolha(el, close, () => run("editCompra", { ...args, row: item.row, antes: item.nome }));
+      if (item) { // trocou de cartão: lança no novo e apaga do antigo
+        if (await salvarDaFolha(el, close, () => run("addCompra", args))) await run("delCompra", { row: item.row, antes: item.nome });
+        return;
+      }
+      salvarDaFolha(el, close, () => run("addCompra", args));
     };
     if (item) $("#f-del", el).onclick = async () => {
       close();
@@ -869,7 +947,7 @@ function fixaSheet(f) {
     <label class="field"><span>Nome da conta</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(f ? f.nome : "")}" placeholder="ex.: LUZ"></label>
     <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="0,00" value="${esc(f ? moneyInput(f.valor) : "")}"></label>
     <label class="field"><span>Dia de vencimento</span><input class="input" id="f-dia" inputmode="numeric" value="${esc(f ? f.dia : "")}" placeholder="ex.: 10"></label>
-    <div class="field"><span>Paga com</span><div class="choices">${choiceBtns("saide", [["1º DINHEIRO", "1º dinheiro"], ["2º DINHEIRO", "2º dinheiro"], ["NO CARTÃO", "No cartão"]], saide)}</div>
+    <div class="field"><span id="g-saide">Paga com</span><div class="choices" role="group" aria-labelledby="g-saide">${choiceBtns("saide", [["1º DINHEIRO", "1º dinheiro"], ["2º DINHEIRO", "2º dinheiro"], ["NO CARTÃO", "No cartão"]], saide)}</div>
       <small>“No cartão” = já vem na fatura de um cartão, não soma de novo.</small></div>
     <label class="field"><span>Onde pagar</span><input class="input" id="f-onde" value="${esc(f ? f.onde : "")}" placeholder="ex.: Aplicativo, PIX, boleto"></label>
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${f ? `<button class="btn danger" id="f-del">Apagar esta conta</button>` : ""}</div>`, (el, close) => {
@@ -877,11 +955,10 @@ function fixaSheet(f) {
     $("#f-ok", el).onclick = () => {
       const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value);
       const dia = parseInt($("#f-dia", el).value, 10);
-      if (!nome) return toast("Escreva o nome da conta.", true);
-      if (valor === null) return toast("Digite o valor.", true);
-      if (!(dia >= 1 && dia <= 31)) return toast("O dia tem que ser de 1 a 31.", true);
-      close();
-      run("saveFixa", { row: f ? f.row : null, antes: f ? f.nome : "", nome, dia, valor, saide, onde: $("#f-onde", el).value.trim() });
+      if (!nome) return formErr(el, "#f-nome", "Escreva o nome da conta.");
+      if (valor === null) return formErr(el, "#f-valor", "Digite o valor, por exemplo 120,00.");
+      if (!(dia >= 1 && dia <= 31)) return formErr(el, "#f-dia", "O dia tem que ser de 1 a 31.");
+      salvarDaFolha(el, close, () => run("saveFixa", { row: f ? f.row : null, antes: f ? f.nome : "", nome, dia, valor, saide, onde: $("#f-onde", el).value.trim() }));
     };
     if (f) $("#f-del", el).onclick = async () => {
       close();
@@ -897,9 +974,9 @@ function valorSheet(title, { nome, valor, nomeEditavel, onSave, onDel }) {
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${onDel ? `<button class="btn danger" id="f-del">Apagar</button>` : ""}</div>`, (el, close) => {
     $("#f-ok", el).onclick = () => {
       const v = parseMoney($("#f-valor", el).value), n = nomeEditavel ? $("#f-nome", el).value.trim().toUpperCase() : nome;
-      if (nomeEditavel && !n) return toast("Escreva o nome.", true);
-      if (v === null) return toast("Digite o valor.", true);
-      close(); onSave(n, v);
+      if (nomeEditavel && !n) return formErr(el, "#f-nome", "Escreva o nome.");
+      if (v === null) return formErr(el, "#f-valor", "Digite o valor, por exemplo 200,00.");
+      salvarDaFolha(el, close, () => onSave(n, v));
     };
     if (onDel) $("#f-del", el).onclick = async () => { close(); if (await confirmSheet("Apagar?", `<b>${esc(nome)}</b>`, "Apagar", true)) onDel(); };
     setTimeout(() => $("#f-valor", el).focus(), 300);
@@ -915,8 +992,9 @@ function cartaoSheet(c) {
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${typeof c.ajuste === "number" ? `<button class="btn ghost" id="f-limpa">Voltar ao vencimento automático</button>` : ""}</div>`, (el, close) => {
     const save = aj => {
       const melhor = parseInt($("#f-melhor", el).value, 10), dia = parseInt($("#f-dia", el).value, 10);
-      if (!(melhor >= 1 && melhor <= 31) || !(dia >= 1 && dia <= 31)) return toast("Os dias têm que ser de 1 a 31.", true);
-      close(); run("saveCartao", { row: c.row, dia, melhor, ajuste: aj });
+      if (!(melhor >= 1 && melhor <= 31)) return formErr(el, "#f-melhor", "O melhor dia tem que ser de 1 a 31.");
+      if (!(dia >= 1 && dia <= 31)) return formErr(el, "#f-dia", "O dia de vencimento tem que ser de 1 a 31.");
+      salvarDaFolha(el, close, () => run("saveCartao", { row: c.row, dia, melhor, ajuste: aj }));
     };
     $("#f-ok", el).onclick = () => save(isoToSerial($("#f-aj", el).value));
     const l = $("#f-limpa", el); if (l) l.onclick = () => save(null);
@@ -932,9 +1010,8 @@ function porquinhoSheet(p) {
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${p ? `<button class="btn danger" id="f-del">Apagar esta linha</button>` : ""}</div>`, (el, close) => {
     $("#f-ok", el).onclick = () => {
       const inter = parseMoney($("#f-inter", el).value), mp = parseMoney($("#f-mp", el).value);
-      if (inter === null && mp === null) return toast("Digite pelo menos um valor.", true);
-      close();
-      run("savePorquinho", { row: p ? p.row : null, data: isoToSerial($("#f-data", el).value) ?? "", inter: inter ?? "", mp: mp ?? "", obs: $("#f-obs", el).value.trim() });
+      if (inter === null && mp === null) return formErr(el, "#f-inter", "Digite pelo menos um valor (Inter ou Mercado Pago).");
+      salvarDaFolha(el, close, () => run("savePorquinho", { row: p ? p.row : null, data: isoToSerial($("#f-data", el).value) ?? "", inter: inter ?? "", mp: mp ?? "", obs: $("#f-obs", el).value.trim() }));
     };
     if (p) $("#f-del", el).onclick = async () => { close(); if (await confirmSheet("Apagar linha?", "Essa anotação do Porquinho será apagada.", "Apagar", true)) run("delPorquinho", { row: p.row }); };
   });
@@ -999,17 +1076,21 @@ document.addEventListener("click", async e => {
 });
 $$(".tabs button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); scrollTo({ top: 0 }); });
 $("#fab").onclick = () => S.m && compraSheet({ cardNome: S.tab === "cartao" ? S.card : null });
-const mudaMes = async d => {
-  const x = S.m && S.m.cur ? monthByIdx(S.m.cur.idx + d) : null;
+// Trocar o mês muda a planilha para todo mundo: pede confirmação sempre (um toque sem querer na seta não basta).
+const mudaMes = async (d, alvo) => {
+  const x = alvo || (S.m && S.m.cur ? monthByIdx(S.m.cur.idx + d) : null);
   if (!x) return;
-  if (!store.get("avisoMes")) {
-    const ok = await confirmSheet("Trocar o mês?", `A planilha vai mostrar <b>${esc(x.nome)}</b>. Isso muda o mês da planilha para todo mundo que usa. Para voltar, é só tocar na outra seta.`, "Trocar o mês");
-    if (!ok) return; store.set("avisoMes", true);
-  }
-  run("setMes", { label: x.label }, { busyText: "Trocando o mês…" });
+  const ok = await confirmSheet("Trocar o mês da planilha?", `A planilha vai mostrar <b>${esc(titleCase(x.nome))}</b> para todo mundo que usa, a Maria também.`, `Mostrar ${titleCase(x.nome)}`);
+  if (!ok) return;
+  if (await run("setMes", { label: x.label }, { busyText: "Trocando o mês…" })) toast(`A planilha agora está em ${titleCase(x.nome)}.`);
 };
+// Mês do calendário (mesma conta de idx da aba Tabelas: ano*12 + mês + 1)
+const mesDeHoje = () => { const d = new Date(); return monthByIdx(d.getFullYear() * 12 + d.getMonth() + 1); };
 $("#mes-prev").onclick = () => mudaMes(-1);
 $("#mes-next").onclick = () => mudaMes(1);
+// internet caiu / voltou: avisa no topo e, quando volta, atualiza os valores
+addEventListener("offline", () => renderBanner());
+addEventListener("online", () => { renderBanner(); if (S.m) refresh({ quiet: true }); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.m && Date.now() - (S.at || 0) > 60000) refresh({ quiet: true }); });
 
 /* ======================= modo de teste (?demo) ======================= */
@@ -1087,5 +1168,9 @@ if ("serviceWorker" in navigator && !DEMO) {
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch(() => {}));
   let hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) location.reload(); hadController = true; });
+  // versão nova: recarrega, mas nunca no meio de um formulário aberto (espera fechar)
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController) { if ($("#sheet-root").classList.contains("open")) pendingReload = true; else location.reload(); }
+    hadController = true;
+  });
 }

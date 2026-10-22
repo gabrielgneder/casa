@@ -14,6 +14,7 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 8. **O endereço não pode mudar:** `https://gabrielgneder.github.io/casa/` (GitHub Pages da conta do Gabriel). O ID do cliente OAuth é o mesmo do app das receitas (projeto no Google Cloud da Maria); o redirecionamento cadastrado é essa URL com barra no final.
 9. **Nada de dados reais no repositório.** `demo-grid.json` (cópia da planilha para testar) fica fora do git. `demo-ficticio.json` é inventado (gerado de uma cópia da planilha com valores falsos, recalculada no Excel) e é publicado para o modo de teste.
 10. **O modo de teste (`?demo`) guarda tudo em `casa-demo.*`**, separado do app de verdade (mesmo endereço, mesmo `localStorage`). Não use `localStorage` direto: use `store`.
+11. **Formulário nunca fecha antes de gravar.** Use `salvarDaFolha(el, close, () => run(...))` (a folha só fecha quando a planilha confirmar; se falhar, o que foi digitado fica) e `formErr(el, campo, msg)` para erro junto do campo. Escolhas usam `pressed()`/`marca()` (aria-pressed). Trocar o mês sempre pede confirmação.
 
 ## Arquivos
 
