@@ -73,8 +73,10 @@ function googleLogin(silent) {
     client_id: CFG.GOOGLE_CLIENT_ID, redirect_uri: baseUrl(), response_type: "token",
     scope: SCOPES, state, include_granted_scopes: "true",
   });
+  // "pick" = primeira entrada: sempre deixa escolher a conta (o celular pode ter várias)
   const email = store.get("email");
-  if (email) p.set("login_hint", email);
+  if (silent === "pick") p.set("prompt", "select_account");
+  else if (email) p.set("login_hint", email);
   if (silent === true) p.set("prompt", "none");
   location.assign("https://accounts.google.com/o/oauth2/v2/auth?" + p.toString());
 }
@@ -620,7 +622,7 @@ function viewMais() {
     </div>
     <p class="note" style="text-align:center">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
-const APP_VERSION = "2";
+const APP_VERSION = "3";
 
 /* ======================= folhas (formulários) ======================= */
 function openSheet(title, body, onMount) {
@@ -820,7 +822,7 @@ document.addEventListener("click", async e => {
   if (!t) return;
   const m = S.m, act = t.dataset.act, row = Number(t.dataset.row);
   switch (act) {
-    case "login": return googleLogin();
+    case "login": return googleLogin("pick");
     case "refresh": return refresh();
     case "tab": S.tab = t.dataset.tab; render(); return scrollTo({ top: 0 });
     case "open-card": S.card = t.dataset.card; S.tab = "cartao"; render(); return scrollTo({ top: 0 });

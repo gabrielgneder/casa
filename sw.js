@@ -1,6 +1,6 @@
 // Service worker: deixa o app abrir sem internet (com os últimos valores guardados).
 // Ao publicar uma versão nova, aumente o número em VERSION para o celular baixar os arquivos novos.
-const VERSION = "casa-v2";
+const VERSION = "casa-v3";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
