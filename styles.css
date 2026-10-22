@@ -35,7 +35,7 @@
   --vista: #cdd6d1;
   --tag-bg: #fff;
   --ico-base: #fff;
-  --warn-bg: #fff0d9; --warn-ink: #b35c00;
+  --warn-bg: #fff0d9; --warn-ink: #9c5000;
   --alert-bg: #ffe3e3; --alert-ink: #7f1d1d;
   --note-bg: #fff4d1; --note-ink: #5b4400;
   --tip-bg: #fff8db; --tip-ink: #5c4500;
@@ -392,10 +392,11 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 .field-err { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--alert-bg); color: var(--alert-ink); font-weight: 700; font-size: .95rem; line-height: 1.35; }
 .field-err::before { content: "!"; flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--bad); color: #fff; font-size: .8rem; font-weight: 900; }
 .stack > .field-err { margin: 12px 0 0; }
-.input[aria-invalid="true"] { border-color: var(--bad); }
-.cardpick:has([aria-invalid="true"]) { outline: 3px solid var(--bad); outline-offset: 4px; border-radius: 16px; }
+.input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--bad); }
+.cardpick[aria-invalid="true"] { outline: 3px solid var(--bad); outline-offset: 4px; border-radius: 16px; }
 .btn:disabled { cursor: progress; }
-.input::placeholder { color: var(--ink-3); opacity: 1; } /* o cinza padrão do navegador não passa no modo noite */
+.input::placeholder { color: var(--ink-3); opacity: 1; font-weight: 500; } /* o cinza padrão do navegador não passa no modo noite */
+.input.money::placeholder { font-size: 1.05rem; font-weight: 500; letter-spacing: 0; } /* não pode parecer um valor já digitado */
 .input { caret-color: var(--brand); }
 ::selection { background: var(--brand-2); color: var(--ink); }
 .input, select.input {
@@ -420,17 +421,21 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 
 /* ---------- avisos ---------- */
 .toast {
-  position: fixed; left: 50%; bottom: calc(var(--tabs-h) + var(--safe-b) + 36px); z-index: 60; /* acima do + Compra, que sobe 24px da barra */
-  transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+  position: fixed; left: 16px; right: 16px; margin: 0 auto; width: fit-content; max-width: 560px;
+  bottom: calc(var(--tabs-h) + var(--safe-b) + 36px); z-index: 60; /* acima do + Compra, que sobe 24px da barra */
+  transform: translateY(20px); opacity: 0; pointer-events: none;
   background: var(--toast-bg); color: #fff; padding: 15px 20px; border-radius: 18px; font-weight: 700; max-width: calc(100% - 32px);
   transition: opacity .2s, transform .2s; text-align: center; box-shadow: var(--shadow-2);
 }
-.toast.on { opacity: 1; transform: translate(-50%, 0); }
+.toast.on { opacity: 1; transform: none; }
+.sheet-root.open ~ .toast { bottom: auto; top: calc(var(--safe-t) + 12px); transform: translateY(-20px); } /* folha aberta: aviso em cima, longe do Salvar */
+.sheet-root.open ~ .toast.on { transform: none; }
 .toast.err { background: var(--bad); }
 .busy { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: var(--busy-bg); }
 .busy div { background: var(--surface); padding: 18px 24px; border-radius: 20px; font-weight: 800; box-shadow: var(--shadow-2); display: flex; gap: 10px; align-items: center; color: var(--ink); }
 
 :focus-visible { outline: 3px solid #1c7ed6; outline-offset: 2px; }
+.top :focus-visible { outline-color: #74c0fc; } /* no topo verde o azul escuro não aparece (2,96:1) */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
@@ -448,7 +453,7 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 .choice.month { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; }
 .choice.month small { font-size: .72rem; font-weight: 700; color: var(--ink-3); margin-top: 2px; }
 .choice.month.on small { color: var(--brand); }
-.linkbtn { border: 0; background: none; color: var(--brand); font-weight: 800; padding: 12px 2px 4px; text-decoration: underline; text-underline-offset: 3px; }
+.linkbtn { border: 0; background: none; color: var(--brand); font-weight: 800; padding: 12px 2px 4px; min-height: 44px; text-decoration: underline; text-underline-offset: 3px; }
 #f-fat-sel { margin-top: 8px; }
 
 /* ---------- tema (dia e noite) ---------- */
@@ -482,8 +487,13 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 .sheet > .stack {
   position: sticky; bottom: calc(-24px - var(--safe-b)); z-index: 2;
   margin: 18px -18px calc(-24px - var(--safe-b)); padding: 4px 18px calc(16px + var(--safe-b));
-  background: var(--bg); box-shadow: 0 -10px 18px -12px rgba(0, 0, 0, .25);
+  background: var(--bg);
 }
+.sheet.rola > .stack { box-shadow: 0 -10px 18px -12px rgba(0, 0, 0, .25); }
+.sheet > .stack:not(:last-child) { margin-bottom: 0; } /* o espaço da barra de início continua embaixo do Salvar */
+.sheet > .stack:not(:last-child) + .apagar-link { margin-top: 0; }
+/* apagar: fora do rodapé fixo, no fim da folha, longe do polegar que vai no Salvar */
+.apagar-link { display: block; margin: 14px auto 0; padding: 12px 16px calc(12px + var(--safe-b)); min-height: 44px; border: 0; background: none; color: var(--bad); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 
 /* título da tela só para leitores de tela (VoiceOver); o título visível é o mês no topo */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

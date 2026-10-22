@@ -788,7 +788,7 @@ function openSheet(title, body, onMount) {
     if (opener && opener.isConnected) opener.focus({ preventScroll: true });
     setTimeout(() => { if (seq === sheetSeq && !root.classList.contains("open")) { root.innerHTML = ""; if (pendingReload) location.reload(); } }, 260);
   };
-  const fechaSeLimpo = () => { if (snap() === inicial) close(); else toast("Para sair sem salvar, toque no ✕."); };
+  const fechaSeLimpo = () => { if (snap() === inicial) close(); else toast("Ainda não salvou. Toque em Salvar, ou no ✕ para sair sem salvar."); };
   const onKey = e => {
     if (seq !== sheetSeq) return document.removeEventListener("keydown", onKey, true);
     if (e.key === "Escape") { e.preventDefault(); fechaSeLimpo(); }
@@ -802,19 +802,34 @@ function openSheet(title, body, onMount) {
   document.addEventListener("keydown", onKey, true);
   $(".scrim", root).onclick = fechaSeLimpo; $(".x", root).onclick = close;
   if (onMount) onMount(sheet, close);
+  const st = $(":scope > .stack", sheet);
+  const del = st && $("#f-del", st); // só o "Apagar" dos formulários; a confirmação de apagar fica no rodapé
+  if (del) { del.className = "apagar-link"; sheet.append(del); }
+  if (!$("input, select, textarea", sheet)) $(".x", sheet).setAttribute("aria-label", "Fechar");
+  const rola = () => sheet.classList.toggle("rola", sheet.scrollHeight > sheet.clientHeight + 2);
+  requestAnimationFrame(rola); setTimeout(rola, 320);
   inicial = snap();
   return close;
 }
 // Mensagem de erro do formulário junto do campo que precisa de atenção (e o campo ganha foco).
 function formErr(el, alvo, msg) {
-  $$(".field-err", el).forEach(x => x.remove());
-  $$("[aria-invalid]", el).forEach(x => x.removeAttribute("aria-invalid"));
+  limpaErro(el);
   const t = typeof alvo === "string" ? $(alvo, el) : alvo;
   const box = (t && t.closest(".field")) || $(".stack", el);
-  const p = document.createElement("p"); p.className = "field-err"; p.setAttribute("role", "alert"); p.textContent = msg;
+  const p = document.createElement("p"); p.className = "field-err"; p.id = "f-err"; p.setAttribute("role", "alert"); p.textContent = msg;
   if (t) box.append(p); else box.prepend(p); // sem campo: em cima do botão Salvar
-  if (t) { t.setAttribute("aria-invalid", "true"); t.scrollIntoView({ block: "center", behavior: "smooth" }); if (t.focus) t.focus({ preventScroll: true }); }
+  if (t) {
+    const marca = t.closest(".cardpick, .choices") || t; // num grupo de botões, quem está "inválido" é o grupo
+    marca.setAttribute("aria-invalid", "true"); marca.setAttribute("aria-describedby", "f-err");
+    // o erro some assim que a pessoa mexe no campo (não fica um "errado" ao lado do valor certo)
+    marca.addEventListener(marca === t ? "input" : "click", () => limpaErro(el), { once: true });
+    t.scrollIntoView({ block: "center", behavior: "smooth" }); if (t.focus) t.focus({ preventScroll: true });
+  }
   return false;
+}
+function limpaErro(el) {
+  $$(".field-err", el).forEach(x => x.remove());
+  $$("[aria-invalid]", el).forEach(x => { x.removeAttribute("aria-invalid"); x.removeAttribute("aria-describedby"); });
 }
 // Salvar sem perder o que foi digitado: a folha só fecha quando a planilha confirmar.
 // Se der errado, o botão volta, a mensagem aparece em cima dele e tudo que foi digitado continua lá.
@@ -877,7 +892,7 @@ function compraSheet({ cardNome, item }) {
     <div class="field"><span id="g-tipo">Como pagou</span><div class="choices" role="group" aria-labelledby="g-tipo">${choiceBtns("tipo", [["vista", "À vista"], ["parc", "Parcelado"], ["fixo", "Todo mês"]], tipo)}</div></div>
     <div class="field" id="parc-box"><span>Quantas parcelas</span>
       <div class="stepper"><button type="button" data-step="-1">−</button><div class="num" id="f-n">${nParc}</div><button type="button" data-step="1">+</button></div></div>
-    <label class="field"><span id="lbl-valor">Valor</span><input class="input money" id="f-valor" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(item ? moneyInput(item.valor) : "")}">
+    <label class="field"><span id="lbl-valor">Valor</span><input class="input money" id="f-valor" inputmode="decimal" autocomplete="off" placeholder="ex.: 49,90" value="${esc(item ? moneyInput(item.valor) : "")}">
       <small id="f-total"></small></label>
     <label class="field"><span>Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
     <div class="field"><span id="g-fat">Entra na fatura de</span>
@@ -968,7 +983,7 @@ function reciboCompra({ args, row, antes, trocou }) {
   openSheet(antes ? "Compra alterada" : "Compra anotada", `
     <div class="recibo">
       <svg class="recibo-ok" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37.5 19"/></svg>
-      <p class="recibo-lead">Está na planilha.</p>
+      <p class="recibo-lead">${DEMO ? "Anotada (modo de teste)." : "Está na planilha."}</p>
       <div class="recibo-linha">
         ${miniCard(l.card)}
         <div class="recibo-main"><b>${esc(args.nome)}</b><span>${esc(l.label)} · ${quando}</span></div>
@@ -997,7 +1012,7 @@ function fixaSheet(f) {
   let saide = f ? f.saide : "1º DINHEIRO";
   openSheet(f ? "Conta fixa" : "Nova conta", `
     <label class="field"><span>Nome da conta</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(f ? f.nome : "")}" placeholder="ex.: LUZ"></label>
-    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="0,00" value="${esc(f ? moneyInput(f.valor) : "")}"></label>
+    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(f ? moneyInput(f.valor) : "")}"></label>
     <label class="field"><span>Dia de vencimento</span><input class="input" id="f-dia" inputmode="numeric" value="${esc(f ? f.dia : "")}" placeholder="ex.: 10"></label>
     <div class="field"><span id="g-saide">Paga com</span><div class="choices" role="group" aria-labelledby="g-saide">${choiceBtns("saide", [["1º DINHEIRO", "1º dinheiro"], ["2º DINHEIRO", "2º dinheiro"], ["NO CARTÃO", "No cartão"]], saide)}</div>
       <small>“No cartão” = já vem na fatura de um cartão, não soma de novo.</small></div>
@@ -1022,7 +1037,7 @@ function fixaSheet(f) {
 function valorSheet(title, { nome, valor, nomeEditavel, onSave, onDel }) {
   openSheet(title, `
     ${nomeEditavel ? `<label class="field"><span>Nome</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(nome || "")}"></label>` : ""}
-    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="0,00" value="${esc(moneyInput(valor))}"></label>
+    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(moneyInput(valor))}"></label>
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${onDel ? `<button class="btn danger" id="f-del">Apagar</button>` : ""}</div>`, (el, close) => {
     $("#f-ok", el).onclick = () => {
       const v = parseMoney($("#f-valor", el).value), n = nomeEditavel ? $("#f-nome", el).value.trim().toUpperCase() : nome;
@@ -1056,8 +1071,8 @@ function cartaoSheet(c) {
 function porquinhoSheet(p) {
   openSheet(p ? "Porquinho" : "Anotar saldo", `
     <label class="field"><span>Data</span><input class="input" type="date" id="f-data" value="${esc(p && typeof p.data === "number" ? serialToIso(p.data) : serialToIso(todaySerial()))}"></label>
-    <label class="field"><span>Inter</span><input class="input money" id="f-inter" inputmode="decimal" placeholder="0,00" value="${esc(p ? moneyInput(p.inter) : "")}"></label>
-    <label class="field"><span>Mercado Pago</span><input class="input money" id="f-mp" inputmode="decimal" placeholder="0,00" value="${esc(p ? moneyInput(p.mp) : "")}"></label>
+    <label class="field"><span>Inter</span><input class="input money" id="f-inter" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(p ? moneyInput(p.inter) : "")}"></label>
+    <label class="field"><span>Mercado Pago</span><input class="input money" id="f-mp" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(p ? moneyInput(p.mp) : "")}"></label>
     <label class="field"><span>Observação</span><input class="input" id="f-obs" value="${esc(p ? p.obs : "")}"></label>
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${p ? `<button class="btn danger" id="f-del">Apagar esta linha</button>` : ""}</div>`, (el, close) => {
     $("#f-ok", el).onclick = () => {
