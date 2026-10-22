@@ -48,15 +48,25 @@ function parseMoney(s) {
 const moneyInput = v => (typeof v === "number" ? v.toFixed(2).replace(".", ",") : "");
 
 /* ======================= cores dos cartões (as mesmas da planilha) ======================= */
-const BRANDS = [ // [nome, cor da planilha, tom escuro do degradê, letra]
-  [/SAMS/, "#6FA8DC", "#2f6fb5", "#fff"], [/CARREFOUR/, "#19D3F0", "#0089b3", "#fff"], [/PICPAY/, "#22D36B", "#0a8f45", "#fff"],
-  [/AMAZON/, "#A3A9B1", "#4d5560", "#fff"], [/ITI/, "#FF4FD2", "#c2009a", "#fff"], [/NUBANK/, "#A23CFF", "#5f00b8", "#fff"],
-  [/MERCADO PAGO/, "#3a3a3a", "#000000", "#fff"], [/INTER/, "#FF9A1F", "#e85d00", "#fff"], [/RENNER/, "#FF3B3B", "#b30000", "#fff"],
+// [nome, cor da planilha, fim do degradê, letra, começo do degradê (se não for a cor da planilha)]
+// A letra é a que passa de 4,5:1 no cartão inteiro (WCAG AA): escura nas cores claras, branca nas escuras.
+// O fim do degradê foi clareado até a letra escura passar; a Renner começa num vermelho mais fechado
+// para a letra branca passar (o vermelho da planilha segue nas barras e títulos).
+const INK = "#1b1f1d";
+const BRANDS = [
+  [/SAMS/, "#6FA8DC", "#4e8bc8", INK], [/CARREFOUR/, "#19D3F0", "#0392ba", INK], [/PICPAY/, "#22D36B", "#0e9b4b", INK],
+  [/AMAZON/, "#A3A9B1", "#818791", INK], [/ITI/, "#FF4FD2", "#eb35c0", INK], [/NUBANK/, "#A23CFF", "#5f00b8", "#fff"],
+  [/MERCADO PAGO/, "#3a3a3a", "#000000", "#fff"], [/INTER/, "#FF9A1F", "#e85d00", INK], [/RENNER/, "#FF3B3B", "#a30000", "#fff", "#d42b2b"],
 ];
 function brand(name) {
   const n = String(name || "").toUpperCase();
-  for (const [re, c1, c2, fg] of BRANDS) if (re.test(n)) return { c1, c2, fg, bg: `linear-gradient(135deg, ${c1}, ${c2})` };
-  return { c1: "#8fa39b", c2: "#5b6f67", fg: "#fff", bg: "linear-gradient(135deg, #8fa39b, #5b6f67)" };
+  const [, c1, c2, fg, g1] = BRANDS.find(([re]) => re.test(n)) || [, "#8fa39b", "#778b83", INK];
+  const claro = fg !== "#fff", start = g1 || c1;
+  return {
+    c1, start, c2, fg, bg: `linear-gradient(135deg, ${start}, ${c2})`,
+    // letra branca: sombra leve e sem brilho branco atrás; letra escura: brilho ajuda e sombra atrapalha
+    sh: claro ? "none" : "0 1px 2px rgba(0,0,0,.25)", shine: claro ? ".3" : "0", pill: claro ? "rgba(255,255,255,.45)" : "rgba(0,0,0,.25)",
+  };
 }
 // Para comparar textos da planilha: sem acento, espaços juntados, tudo maiúsculo ("  Cartões " = "CARTOES").
 const norm = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
@@ -510,7 +520,7 @@ function contaIcon(nome) {
   return { ic: "coin", cor: "#2f9e44" };
 }
 const icoBubble = nome => { const { ic, cor } = contaIcon(nome); return `<span class="ico" style="--ic:${cor}"><svg><use href="#i-${ic}"/></svg></span>`; };
-const cardStyle = nome => { const b = brand(nome); return `--c1:${b.c1};--c2:${b.c2};--fg:${b.fg}`; };
+const cardStyle = nome => { const b = brand(nome); return `--c1:${b.start};--c2:${b.c2};--fg:${b.fg};--sh:${b.sh};--shine:${b.shine};--pill:${b.pill}`; };
 const miniCard = nome => `<span class="mini" style="${cardStyle(nome)}"><i></i></span>`;
 const diasAte = serial => (typeof serial === "number" ? serial - todaySerial() : null);
 function dueBadge(serial) {
@@ -780,7 +790,7 @@ function compraSheet({ cardNome, item }) {
   const autoFat = () => { const c = cardOf(); const x = c ? faturaPara(c, dataSerial) : null; return x ? x.label : ""; };
   if (!item && lista) fat = autoFat();
 
-  const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" style="background:${b.bg};color:${b.fg}">${esc(l.label)}</button>`; }).join("");
+  const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("");
   const body = `
     <div class="field"><span>Cartão</span><div class="cardpick">${pick}</div></div>
     <label class="field"><span>O que comprou</span><input class="input" id="f-nome" autocomplete="off" autocapitalize="characters" value="${esc(item ? item.nome : "")}" placeholder="ex.: MERCADO"></label>
