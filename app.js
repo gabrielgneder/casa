@@ -507,7 +507,9 @@ function render() {
   $("#mes-next").disabled = !m.cur || !monthByIdx(m.cur.idx + 1);
   $$(".tabs [data-tab]").forEach(b => { const on = b.dataset.tab === S.tab || (S.tab === "cartao" && b.dataset.tab === "cartoes"); b.classList.toggle("on", on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); });
   const views = { inicio: viewInicio, cartoes: viewCartoes, contas: viewContas, mais: viewMais, cartao: viewCartao };
-  main.innerHTML = (views[S.tab] || viewInicio)() + statusHtml();
+  const corpo = (views[S.tab] || viewInicio)(); // pode trocar S.tab (cartão que sumiu volta para Cartões)
+  const titulo = { inicio: "Início", cartoes: "Cartões", contas: "Contas", mais: "Mais", cartao: S.card ? titleCase(S.card) : "Cartão" }[S.tab] || "Início";
+  main.innerHTML = `<h1 class="sr-only">${esc(titulo)} · ${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</h1>` + corpo + statusHtml();
   renderStatus();
 }
 

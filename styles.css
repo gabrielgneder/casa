@@ -238,7 +238,6 @@ button.item:active { background: var(--press); }
 .cc:active { transform: scale(.985); }
 .cc-top { display: flex; justify-content: space-between; align-items: center; }
 .cc-name { font-weight: 800; font-size: 1.2rem; letter-spacing: -.01em; text-shadow: var(--sh, none); }
-.cc-wave { width: 26px; height: 26px; opacity: .85; }
 .cc-chip { width: 44px; height: 33px; border-radius: 7px; margin-top: 10px; background: linear-gradient(135deg, #f8e7a1, #d4ad45 60%, #b8902c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
 .cc-lbl { align-self: end; font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .cc-val { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; text-shadow: var(--sh, none); }
@@ -418,13 +417,10 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 .stepper { display: flex; align-items: center; gap: 10px; }
 .stepper button { width: 60px; height: 58px; border-radius: 16px; border: 2px solid var(--line); background: var(--field); font-size: 1.7rem; font-weight: 800; }
 .stepper .num { flex: 1; text-align: center; font-size: 1.7rem; font-weight: 800; }
-.fatura-box { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 16px; background: var(--brand-2); }
-.fatura-box b { font-size: 1.25rem; }
-.fatura-box button { margin-left: auto; border: 0; background: var(--surface); border-radius: 12px; color: var(--brand); font-weight: 800; padding: 10px 14px; }
 
 /* ---------- avisos ---------- */
 .toast {
-  position: fixed; left: 50%; bottom: calc(var(--tabs-h) + var(--safe-b) + 18px); z-index: 60;
+  position: fixed; left: 50%; bottom: calc(var(--tabs-h) + var(--safe-b) + 36px); z-index: 60; /* acima do + Compra, que sobe 24px da barra */
   transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
   background: var(--toast-bg); color: #fff; padding: 15px 20px; border-radius: 18px; font-weight: 700; max-width: calc(100% - 32px);
   transition: opacity .2s, transform .2s; text-align: center; box-shadow: var(--shadow-2);
@@ -488,3 +484,6 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
   margin: 18px -18px calc(-24px - var(--safe-b)); padding: 4px 18px calc(16px + var(--safe-b));
   background: var(--bg); box-shadow: 0 -10px 18px -12px rgba(0, 0, 0, .25);
 }
+
+/* título da tela só para leitores de tela (VoiceOver); o título visível é o mês no topo */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
