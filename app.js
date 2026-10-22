@@ -702,7 +702,7 @@ function viewMais() {
     <button class="btn ghost" data-act="logout">Sair da conta</button>
     <p class="ver">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
-const APP_VERSION = "5";
+const APP_VERSION = "6";
 
 /* ======================= folhas (formulários) ======================= */
 function openSheet(title, body, onMount) {
