@@ -374,17 +374,21 @@ async function fecharMes() {
   // 1) guarda o mês (bloco do mês + Carlos) e as compras dele em ANTERIORES, o mais novo em cima
   const ini = m.ranges.title, fim = m.ranges.carlosDif, altura = fim - ini + 1;
   const compras = [];
-  for (const l of m.listas) for (const it of l.itens) if (num(it.noMes) > 0) compras.push([l.label, it.nome, it.valor, it.data === "" ? "" : fmtDate(it.data), it.sit]);
+  for (const l of m.listas) for (const it of l.itens) if (num(it.noMes) > 0) compras.push([l.label, it.nome, it.valor, it.data, it.sit]);
   const total = 1 + altura + 2 + compras.length + 3;
   const hoje = new Date().toLocaleDateString("pt-BR");
+  const r0 = 4 + altura + 2; // linha (1-based) do cabeçalho das compras
+  // a data das compras vai como número de série; a coluna D recebe formato de data
+  const fmtDatas = compras.length ? [{ repeatCell: { range: { sheetId: histId, startRowIndex: r0, endRowIndex: r0 + compras.length, startColumnIndex: 3, endColumnIndex: 4 },
+    cell: { userEnteredFormat: { numberFormat: { type: "DATE", pattern: "dd/mm/yyyy" } } }, fields: "userEnteredFormat.numberFormat" } }] : [];
   await api(":batchUpdate", { method: "POST", body: JSON.stringify({ requests: [
     { insertDimension: { range: { sheetId: histId, dimension: "ROWS", startIndex: 3, endIndex: 3 + total }, inheritFromBefore: false } },
     { copyPaste: { source: { sheetId: casaId, startRowIndex: ini - 1, endRowIndex: fim, startColumnIndex: 0, endColumnIndex: 7 },
                    destination: { sheetId: histId, startRowIndex: 4, endRowIndex: 4 + altura, startColumnIndex: 0, endColumnIndex: 7 }, pasteType: "PASTE_FORMAT" } },
     { copyPaste: { source: { sheetId: casaId, startRowIndex: ini - 1, endRowIndex: fim, startColumnIndex: 0, endColumnIndex: 7 },
                    destination: { sheetId: histId, startRowIndex: 4, endRowIndex: 4 + altura, startColumnIndex: 0, endColumnIndex: 7 }, pasteType: "PASTE_VALUES" } },
+    ...fmtDatas,
   ] }) });
-  const r0 = 4 + altura + 2; // linha (1-based) do cabeçalho das compras
   const data = [
     { range: "ANTERIORES!A4", values: [[`${m.cur.nome} – fechado em ${hoje}`]] },
     { range: `ANTERIORES!A${r0}:E${r0}`, values: [["CARTÃO", "COMPRA", "VALOR", "DATA", "SITUAÇÃO"]] },
@@ -702,7 +706,7 @@ function viewMais() {
     <button class="btn ghost" data-act="logout">Sair da conta</button>
     <p class="ver">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
-const APP_VERSION = "6";
+const APP_VERSION = "7";
 
 /* ======================= folhas (formulários) ======================= */
 function openSheet(title, body, onMount) {
