@@ -285,6 +285,7 @@ const OPS = {
     }
     if (row < 0) throw new Error("A lista desse cartão está cheia. Use “Fechar o mês” (em Mais) para tirar as compras que já acabaram.");
     await writeRaw([{ range: `CASA!A${row}:E${row}`, values: [[nome, valor, data, parc, fat]] }]);
+    OPS.ultimaLinha = row;
     return `Compra salva em ${l.label}.`;
   },
   async editCompra({ row, antes, nome, valor, data, parc, fat }) {
@@ -368,7 +369,7 @@ function relogin() { if (canSilent()) googleLogin(true); else googleLogin(); }
 
 // run.erro guarda a última mensagem de erro (a folha mostra ela junto do botão Salvar).
 const SEM_NET = "Sem internet agora. Nada foi salvo ainda.";
-async function run(op, args, { busyText = "Salvando…" } = {}) {
+async function run(op, args, { busyText = "Salvando…", quieto = false } = {}) {
   run.erro = null;
   if (!DEMO && !Token.get()) { store.set("pending", { op, args }); run.erro = "Conectando ao Google…"; toast(run.erro); relogin(); return false; }
   if (!DEMO && navigator.onLine === false) { run.erro = SEM_NET; toast(SEM_NET, true); return false; }
@@ -377,7 +378,7 @@ async function run(op, args, { busyText = "Salvando…" } = {}) {
     const msg = await OPS[op](args);
     store.del("pending");
     await refresh({ quiet: true });
-    if (msg) toast(msg);
+    if (msg && !quieto) toast(msg);
     return true;
   } catch (e) {
     if (e instanceof AuthError) { store.set("pending", { op, args }); relogin(); return false; }
@@ -783,7 +784,7 @@ function openSheet(title, body, onMount) {
     BEHIND().forEach(e => e.inert = false);
     document.removeEventListener("keydown", onKey, true);
     if (opener && opener.isConnected) opener.focus({ preventScroll: true });
-    setTimeout(() => { if (!root.classList.contains("open")) { root.innerHTML = ""; if (pendingReload) location.reload(); } }, 260);
+    setTimeout(() => { if (seq === sheetSeq && !root.classList.contains("open")) { root.innerHTML = ""; if (pendingReload) location.reload(); } }, 260);
   };
   const fechaSeLimpo = () => { if (snap() === inicial) close(); else toast("Para sair sem salvar, toque no ✕."); };
   const onKey = e => {
@@ -925,12 +926,21 @@ function compraSheet({ cardNome, item }) {
       if (!fat) return formErr(el, "#f-fat-opts button, #f-fat-sel", "Escolha em qual fatura entra.");
       const parc = tipo === "fixo" ? "FIXO" : tipo === "parc" ? nParc : "";
       const args = { lista: lista.nome, nome, valor, data: dataSerial, parc, fat };
-      if (item && lista.itens.some(i => i.row === item.row)) return salvarDaFolha(el, close, () => run("editCompra", { ...args, row: item.row, antes: item.nome }));
-      if (item) { // trocou de cartão: lança no novo e apaga do antigo
-        if (await salvarDaFolha(el, close, () => run("addCompra", args))) await run("delCompra", { row: item.row, antes: item.nome });
+      const q = { quieto: true }; // o recibo substitui o aviso
+      if (item && lista.itens.some(i => i.row === item.row)) {
+        const antes = { nome: item.nome, valor: item.valor, data: item.data, parc: item.parc, fat: item.fat };
+        if (await salvarDaFolha(el, close, () => run("editCompra", { ...args, row: item.row, antes: item.nome }, q))) reciboCompra({ args, row: item.row, antes });
         return;
       }
-      salvarDaFolha(el, close, () => run("addCompra", args));
+      if (item) { // trocou de cartão: lança no novo e apaga do antigo
+        if (await salvarDaFolha(el, close, () => run("addCompra", args, q))) {
+          const row = OPS.ultimaLinha;
+          await run("delCompra", { row: item.row, antes: item.nome }, q);
+          reciboCompra({ args, row, trocou: true });
+        }
+        return;
+      }
+      if (await salvarDaFolha(el, close, () => run("addCompra", args, q))) reciboCompra({ args, row: OPS.ultimaLinha });
     };
     if (item) $("#f-del", el).onclick = async () => {
       close();
@@ -938,6 +948,46 @@ function compraSheet({ cardNome, item }) {
         run("delCompra", { row: item.row, antes: item.nome });
     };
     if (!item) setTimeout(() => (lista ? $("#f-nome", el) : null)?.focus(), 300);
+  });
+}
+
+// Recibo depois de salvar uma compra: diz onde ela entrou (cartão, fatura, valor) e fica até tocar em Pronto.
+// "Desfazer" apaga a compra nova ou volta a alteração (com a mesma conferência de linha do resto do app).
+function reciboCompra({ args, row, antes, trocou }) {
+  const l = S.m.listas.find(x => x.nome === args.lista);
+  if (!l) return toast("Compra salva.");
+  const fatM = monthByLabel(args.fat), mesFat = fatM ? titleCase(fatM.nome).split(" ")[0].toLowerCase() : args.fat;
+  const n = Number(args.parc);
+  const valor = args.parc === "FIXO" ? `${brl(args.valor)}<small>todo mês</small>`
+    : n > 1 ? `${n}× ${brl(args.valor)}<small>total ${brl(args.valor * n)}</small>` : brl(args.valor);
+  const quando = args.parc === "FIXO" ? `começa na fatura de <b>${esc(mesFat)}</b>`
+    : n > 1 ? `1ª parcela na fatura de <b>${esc(mesFat)}</b>` : `entra na fatura de <b>${esc(mesFat)}</b>`;
+  const desfazer = trocou ? "" : `<button type="button" class="linkbtn recibo-desfazer" data-desfazer>${antes ? "Desfazer a alteração" : "Desfazer: apagar esta compra"}</button>`;
+  openSheet(antes ? "Compra alterada" : "Compra anotada", `
+    <div class="recibo">
+      <svg class="recibo-ok" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37.5 19"/></svg>
+      <p class="recibo-lead">Está na planilha.</p>
+      <div class="recibo-linha">
+        ${miniCard(l.card)}
+        <div class="recibo-main"><b>${esc(args.nome)}</b><span>${esc(l.label)} · ${quando}</span></div>
+        <div class="recibo-v">${valor}</div>
+      </div>
+    </div>
+    <div class="stack"><button class="btn big" id="f-ok" data-pronto>Pronto</button>
+      <button class="btn ghost" data-ver>Ver no cartão</button>${desfazer}</div>`, (el, close) => {
+    $("[data-pronto]", el).onclick = close;
+    $("[data-ver]", el).onclick = () => {
+      close(); S.card = l.card; S.tab = "cartao"; render();
+      const b = $(`[data-act="edit-compra"][data-row="${row}"]`);
+      if (b) { b.scrollIntoView({ block: "center", behavior: "smooth" }); b.classList.add("recem"); setTimeout(() => b.classList.remove("recem"), 2600); b.focus({ preventScroll: true }); }
+    };
+    const d = $("[data-desfazer]", el);
+    if (d) d.onclick = async () => {
+      close();
+      const ok = antes ? await run("editCompra", { ...antes, row, antes: args.nome }, { quieto: true, busyText: "Desfazendo…" })
+        : await run("delCompra", { row, antes: args.nome }, { quieto: true, busyText: "Desfazendo…" });
+      if (ok) toast(antes ? "Pronto, a compra voltou como estava." : "Pronto, a compra saiu da planilha.");
+    };
   });
 }
 

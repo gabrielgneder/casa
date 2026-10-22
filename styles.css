@@ -459,3 +459,26 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 /* ---------- tema (dia e noite) ---------- */
 .theme-pick .choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 76px; }
 .theme-pick .choice svg { width: 26px; height: 26px; }
+
+/* ---------- recibo depois de salvar uma compra ---------- */
+.recibo { text-align: center; padding: 4px 0 6px; }
+.recibo-ok { width: 64px; height: 64px; display: block; margin: 6px auto 10px; }
+.recibo-ok circle { fill: color-mix(in srgb, var(--good) 14%, var(--surface)); stroke: var(--good); stroke-width: 3; }
+.recibo-ok path { fill: none; stroke: var(--good); stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 34; stroke-dashoffset: 34; animation: recibo-risca .42s cubic-bezier(.22, 1, .36, 1) .12s forwards; }
+@keyframes recibo-risca { to { stroke-dashoffset: 0; } }
+.recibo-lead { margin: 0 0 16px; font-size: 1.3rem; font-weight: 800; letter-spacing: -.01em; }
+.recibo-linha { display: flex; align-items: center; gap: 12px; text-align: left; padding: 14px 16px; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-1); }
+.recibo-main { flex: 1; min-width: 0; }
+.recibo-main b { display: block; font-size: 1.05rem; overflow-wrap: anywhere; }
+.recibo-main span { display: block; margin-top: 3px; color: var(--ink-2); font-size: .9rem; }
+.recibo-v { font-weight: 800; font-size: 1.1rem; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.recibo-v small { display: block; margin-top: 2px; color: var(--ink-3); font-size: .78rem; font-weight: 700; }
+.recibo-desfazer { display: block; margin: 8px auto 0; min-height: 44px; color: var(--bad); }
+/* a compra que acabou de entrar acende na lista */
+.buy.recem { animation: recem-acende 2.4s ease-out; }
+@keyframes recem-acende { 0%, 35% { box-shadow: inset 0 0 0 3px var(--brand); } 100% { box-shadow: inset 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .recibo-ok path { stroke-dashoffset: 0; }
+  .buy.recem { animation: none; box-shadow: inset 0 0 0 3px var(--brand); }
+}
