@@ -731,12 +731,16 @@ function pedir2o() {
 }
 const pedidoHtml = p => `Para pagar os cartões e as contas do 2º dinheiro sem faltar, peça ao Carlos <b>${brl(p.valor)}</b>.`
   + (p.faltam ? ` <br>Ainda faltam lançar <b>${p.faltam} conta${p.faltam > 1 ? "s" : ""} fixa${p.faltam > 1 ? "s" : ""}</b>: esse valor vai subir quando lançar.` : "");
-// Quanto ainda pode gastar no cartão neste mês.
+// Quanto ela ainda pode gastar no cartão neste mês.
 // limite = "Previsto livre p/ cartão" da planilha (entrou − contas fixas − parcelas que já vinham de antes);
-// usado = compras novas que entram na fatura deste mês (fatura − "Já previsto" de cada cartão).
+// usado = compras novas dela que entram na fatura deste mês (1ª fatura = este mês). As do "Nubank do Carlos"
+// não entram: ele paga a mais no mês seguinte. (Nas listas sem Carlos dá o mesmo que fatura − "Já previsto".)
 function gastoCartao(m) {
-  const limite = num(m.previsto);
-  const usado = Math.round(m.faturas.reduce((t, f) => t + Math.max(0, num(f.valor) - num(f.previsto)), 0) * 100) / 100;
+  const limite = num(m.previsto), cur = m.cur ? m.cur.idx : null;
+  let usado = 0;
+  if (cur !== null) for (const l of m.listas) if (!/CARLOS/.test(norm(l.nome)))
+    for (const it of l.itens) if (num(it.noMes) > 0 && num(it.ini) >= cur) usado += num(it.noMes);
+  usado = Math.round(usado * 100) / 100;
   return { limite, usado, resta: Math.round((limite - usado) * 100) / 100 };
 }
 function freeHtml({ limite, usado, resta }) {
@@ -745,7 +749,7 @@ function freeHtml({ limite, usado, resta }) {
     ? ["Livre para gastar no cartão", brl(limite), "O dinheiro do mês já está todo comprometido."]
     : resta < 0
       ? ["Passou do previsto no cartão", brl(-resta), `Gastou ${brl(usado)} em compras novas; o previsto era ${brl(limite)}.`]
-      : ["Ainda pode gastar no cartão", brl(resta), `Já gastou ${brl(usado)} de ${brl(limite)} neste mês`];
+      : ["Ainda pode gastar no cartão", brl(resta), `Já gastou ${brl(usado)} de ${brl(limite)} neste mês (fora as do Carlos)`];
   return `<button class="free" data-act="tab" data-tab="cartoes">
       <span class="free-ic"><svg><use href="#i-card"/></svg></span>
       <span class="free-main"><span class="free-l">${rotulo}</span><span class="free-v ${resta < 0 || limite <= 0 ? "neg" : ""}">${valor}</span>
