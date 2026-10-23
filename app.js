@@ -369,7 +369,13 @@ async function mudaPag(mes, tipo, nome, linha) {
   await gravaPag(ficam);
 }
 // nome da conta sem o "(no Carrefour)" do fim: o cartão agora muda todo mês
-const nomeConta = nome => String(nome || "").replace(/\s*\(no [^)]*\)\s*$/i, "").trim();
+const nomeConta = nome => String(nome || "").replace(/\s*\((no [^)]*|m[eê]s anterior)\)\s*$/i, "").trim();
+// Conta do mês anterior (ex.: condomínio): ela recebe no fim do mês e paga atrasado a conta que venceu no mês
+// anterior. Fica marcada no nome, na planilha: "CONDOMÍNIO (MÊS ANTERIOR)". Na tela de novembro: "Condomínio de outubro".
+const SUF_ANT = " (MÊS ANTERIOR)";
+const ehAnterior = nome => /\(MES ANTERIOR\)$/.test(norm(nome));
+const mesAnt = () => { const x = S.m && S.m.cur && monthByIdx(S.m.cur.idx - 1); return x ? titleCase(x.nome).split(" ")[0].toLowerCase() : "mês passado"; };
+const tituloConta = f => nomeConta(f.nome) + (ehAnterior(f.nome) ? ` de ${mesAnt()}` : "");
 const casaNome = (a, b) => { const x = norm(nomeConta(a)), y = norm(nomeConta(b)); return !!x && !!y && (x.startsWith(y) || y.startsWith(x)); };
 
 const OPS = {
@@ -879,11 +885,13 @@ const pedidoHtml = p => `Para pagar os cartões e as contas do 2º dinheiro sem 
 // Com tudo pago, ele fica igual à Sobra final da planilha; a diferença é o que falta pagar.
 // Conta "no cartão" não sai do disponível: ela vai na fatura do cartão escolhido.
 const pagaCom = x => x === "1º DINHEIRO" || x === "2º DINHEIRO";
-function venceDia(m, dia) {
+// vencimento da conta no mês da tela (conta do mês anterior: no mês anterior)
+function venceDia(m, dia, anterior) {
   const d = m.cur && fromSerial(m.cur.serial), n = parseInt(dia, 10);
   if (!d || !(n >= 1)) return null;
-  const ult = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-  return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), Math.min(n, ult)) - EPOCH) / 86400000);
+  const mo = d.getUTCMonth() - (anterior ? 1 : 0);
+  const ult = new Date(Date.UTC(d.getUTCFullYear(), mo + 1, 0)).getUTCDate();
+  return Math.round((Date.UTC(d.getUTCFullYear(), mo, Math.min(n, ult)) - EPOCH) / 86400000);
 }
 function caixa(m) {
   const r = x => Math.round(x * 100) / 100;
@@ -891,7 +899,7 @@ function caixa(m) {
   const fats = m.faturas.filter(f => pagaCom(f.saide));
   const aPagar = [], pagos = [];
   for (const f of fixas) {
-    const venc = venceDia(m, f.dia), x = { tipo: "conta", f, venc };
+    const venc = venceDia(m, f.dia, ehAnterior(f.nome)), x = { tipo: "conta", f, venc };
     if (f.saide === "NO CARTÃO") (f.pago && f.pago.lista ? pagos : aPagar).push(x);
     else if (f.pago && !f.pago.lista) pagos.push(x);
     else aPagar.push(x);
@@ -911,14 +919,14 @@ function caixa(m) {
   const disp = r(entrou - pago);
   return { entrou, pago, disp, falta: r(disp - num(m.sobraFinal)), aPagar, pagos };
 }
-const nomeDe = x => (x.tipo === "fatura" ? `Fatura ${titleCase(x.f.nome)}` : nomeConta(x.f.nome));
+const nomeDe = x => (x.tipo === "fatura" ? `Fatura ${titleCase(x.f.nome)}` : tituloConta(x.f));
 // Linha de conta/fatura com o botão de pagar à direita (pedido da Rosany): o lado esquerdo abre a conta
 // (ou o cartão); o direito mostra o valor e "Pagar" — depois de pago, o carimbo PAGO.
 function botaoPagar(f, fat, dif) {
   const lp = !fat && f.pago && f.pago.lista && S.m.listas.find(l => l.nome === f.pago.lista);
   const cartao = !fat && f.saide === "NO CARTÃO";
   const attrs = fat ? `data-act="pagar-fatura" data-card="${esc(f.nome)}"` : `data-act="pagar-fixa" data-row="${f.row}"`;
-  const nome = fat ? `fatura ${titleCase(f.nome)}` : nomeConta(f.nome);
+  const nome = fat ? `fatura ${titleCase(f.nome)}` : tituloConta(f);
   if (!fat && f.valor === "") return `<button class="paga" ${attrs} aria-label="Lançar o valor de ${esc(nome)}"><span class="paga-v">—</span><span class="paga-b">Lançar</span></button>`;
   if (dif) return `<button class="paga" ${attrs} aria-label="Pagar a diferença da ${esc(nome)}"><span class="paga-v">${brl(dif)}</span><span class="paga-b">Pagar</span></button>`;
   if (lp) return `<button class="paga feito" ${attrs} aria-label="${esc(nome)}: lançada no ${esc(lp.label)}"><span class="paga-v">${brl(f.pago.valor)}</span><span class="carimbo">No cartão</span></button>`;
@@ -932,14 +940,14 @@ function linhaConta({ f, fat, venc, dif }, sub) {
   return `<div class="linha ${feito ? "ok" : ""}">
     <button class="item" ${abre}>
       ${fat ? miniCard(f.nome) : icoBubble(f.nome)}
-      <span class="item-main"><span class="item-t">${esc(fat ? `Fatura ${titleCase(f.nome)}` : nomeConta(f.nome))} ${feito ? "" : dueBadge(venc)}</span><span class="item-s">${sub}</span></span>
+      <span class="item-main"><span class="item-t">${esc(fat ? `Fatura ${titleCase(f.nome)}` : tituloConta(f))} ${feito ? "" : dueBadge(venc)}</span><span class="item-s">${sub}</span></span>
     </button>${botaoPagar(f, fat, dif)}</div>`;
 }
 function pagarHtml(x) {
   const f = x.f, fat = x.tipo === "fatura", cartao = !fat && f.saide === "NO CARTÃO";
   const sub = x.dif ? `já pagou ${brl(f.pago.valor)} · falta o resto`
     : cartao ? "paga no cartão · escolher qual"
-    : `${x.venc ? `vence ${esc(fmtDate(x.venc, "short"))} · ` : ""}${saideChip(f.saide)}`;
+    : `${x.venc ? `${ehAnterior(f.nome) ? "venceu" : "vence"} ${esc(fmtDate(x.venc, "short"))} · ` : ""}${ehAnterior(f.nome) ? "paga atrasado · " : ""}${saideChip(f.saide)}`;
   return linhaConta({ f, fat, venc: x.venc, dif: x.dif }, sub);
 }
 function pagoHtml(x) {
@@ -970,7 +978,7 @@ function viewContas() {
   // conta sem valor = ainda não lançada este mês (o fechamento deixa em branco); mostra o do mês passado como referência
   // contas fixas e faturas dos cartões juntas, pela data de vencimento, cada uma com o botão Pagar
   // (as compras de cada cartão continuam só na aba Cartões)
-  const linhas = fixas.map(f => ({ f, fat: false, venc: venceDia(m, f.dia) }))
+  const linhas = fixas.map(f => ({ f, fat: false, venc: venceDia(m, f.dia, ehAnterior(f.nome)) }))
     .concat(m.faturas.filter(f => pagaCom(f.saide) && (num(f.valor) > 0 || f.pago)).map(f => ({ f, fat: true, venc: f.venc })));
   const fix = linhas.sort((a, b) => (!a.fat && a.f.valor === "" ? 0 : 1) - (!b.fat && b.f.valor === "" ? 0 : 1) || (a.venc ?? 1e9) - (b.venc ?? 1e9)).map(({ f, fat, venc }) => {
     if (fat) {
@@ -979,7 +987,7 @@ function viewContas() {
     }
     const ant = m.prevFixas[norm(f.nome)];
     const falta = f.valor === "", cartao = f.saide === "NO CARTÃO";
-    const sub = `dia ${esc(f.dia)} · ${saideChip(f.saide)}${f.onde ? ` · ${esc(f.onde)}` : ""}${falta && ant !== undefined ? `<br>mês passado: ${brl(ant)}` : ""}`;
+    const sub = `${ehAnterior(f.nome) && venc ? `venceu ${esc(fmtDate(venc, "short"))} · paga atrasado` : `dia ${esc(f.dia)}`} · ${saideChip(f.saide)}${f.onde ? ` · ${esc(f.onde)}` : ""}${falta && ant !== undefined ? `<br>mês passado: ${brl(ant)}` : ""}`;
     return linhaConta({ f, fat: false, venc }, sub).replace('class="linha', `class="linha ${falta ? "falta" : ""} ${cartao && !(f.pago && f.pago.lista) ? "dim" : ""}`);
   }).join("");
   const neg = num(m.sobraFinal) < 0;
@@ -1355,7 +1363,7 @@ function envioCarlosSheet(e) {
 // O valor confirmado vai para a planilha (coluna Valor) e sai do dinheiro disponível.
 function pagarSheet(f) {
   if (f.saide === "NO CARTÃO" || f.valor === "" || !pagaCom(f.saide)) return fixaSheet(f);
-  const p = f.pago, nome = nomeConta(f.nome);
+  const p = f.pago, nome = tituloConta(f);
   openSheet(p ? `${nome}: paga` : `Pagar ${nome}`, `
     ${p ? `<div class="pago-box"><b>✓ Paga${typeof p.data === "number" ? ` dia ${esc(fmtDate(p.data, "short"))}` : ""}</b>: ${brl(p.valor)} já saiu do dinheiro disponível.</div>`
       : `<p class="tip">O valor previsto já está aqui. Se a conta veio diferente, mude antes de confirmar.</p>`}
@@ -1385,7 +1393,7 @@ function pagarSheet(f) {
 // Nome, dia, "paga com" e onde pagar ficam em "Mudar os dados da conta" (abertos numa conta nova).
 function fixaSheet(f) {
   const m = S.m;
-  let saide = f ? f.saide : "1º DINHEIRO";
+  let saide = f ? f.saide : "1º DINHEIRO", anterior = !!(f && ehAnterior(f.nome));
   const p = f && f.pago;
   const listas = m.listas.filter(l => m.cartoes.some(c => c.nome === l.card));
   let lista = p && p.lista ? listas.find(l => l.nome === p.lista) || null : null;
@@ -1395,14 +1403,16 @@ function fixaSheet(f) {
   const ant = f ? m.prevFixas[norm(f.nome)] : undefined;
   const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" aria-pressed="${!!(lista && lista.nome === l.nome)}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("");
   const dados = `
-      <label class="field"><span>Nome da conta</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(f ? f.nome : "")}" placeholder="ex.: LUZ"></label>
+      <label class="field"><span>Nome da conta</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(f ? f.nome.replace(/\s*\(m[eê]s anterior\)\s*$/i, "") : "")}" placeholder="ex.: LUZ"></label>
       <label class="field"><span>Dia de vencimento</span><input class="input" id="f-dia" inputmode="numeric" value="${esc(f ? f.dia : "")}" placeholder="ex.: 10"></label>
+      <div class="field"><span id="g-ant">De qual mês é a conta que ela paga?</span><div class="choices duas" role="group" aria-labelledby="g-ant">${choiceBtns("ant", [["", "Do mês"], ["1", "Do mês anterior"]], anterior ? "1" : "")}</div>
+        <small>“Do mês anterior” = paga atrasado com o dinheiro do fim do mês (ex.: no mês de novembro paga o condomínio de outubro).</small></div>
       <div class="field"><span id="g-saide">Paga com</span><div class="choices" role="group" aria-labelledby="g-saide">${choiceBtns("saide", [["1º DINHEIRO", "1º dinheiro"], ["2º DINHEIRO", "2º dinheiro"], ["NO CARTÃO", "No cartão"]], saide)}</div>
         <small>“No cartão” = paga com um cartão de crédito: vai na fatura dele, não sai do dinheiro.</small></div>
       <label class="field"><span>Onde pagar</span><input class="input" id="f-onde" value="${esc(f ? f.onde : "")}" placeholder="ex.: Aplicativo, PIX, boleto"></label>`;
-  openSheet(f ? nomeConta(f.nome) || "Conta fixa" : "Nova conta", `
+  openSheet(f ? tituloConta(f) || "Conta fixa" : "Nova conta", `
     <div class="pago-box" id="f-status" hidden></div>
-    <label class="field"><span>Valor deste mês</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(f ? moneyInput(f.valor) : "")}">
+    <label class="field"><span>${anterior ? `Valor do boleto de ${mesAnt()}` : "Valor deste mês"}</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(f ? moneyInput(f.valor) : "")}">
       ${ant !== undefined ? `<small>Mês passado: ${brl(ant)}</small>` : ""}</label>
     <div class="so-cartao-fixa">
       <div class="field"><span id="g-cartao">Em qual cartão pagou este mês?</span><div class="cardpick" role="group" aria-labelledby="g-cartao">${pick}</div></div>
@@ -1438,15 +1448,17 @@ function fixaSheet(f) {
     };
     $$("[data-lista]", el).forEach(b => b.onclick = () => { lista = listas.find(l => l.nome === b.dataset.lista); marca($$("[data-lista]", el), b); if (!fatManual) fat = autoFat(); upd(); });
     bindChoices(el, "saide", v => { saide = v; upd(); });
+    bindChoices(el, "ant", v => { anterior = v === "1"; });
     $("#f-valor", el).oninput = upd;
     if (lista && !fat) fat = autoFat();
     upd();
     if (f && f.valor === "") setTimeout(() => $("#f-valor", el).focus(), 300);
     const dadosOk = () => {
-      const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value);
+      const base = $("#f-nome", el).value.trim().toUpperCase().replace(/\s*\(M[EÊ]S ANTERIOR\)\s*$/, ""), valor = parseMoney($("#f-valor", el).value);
+      const nome = base && anterior ? base + SUF_ANT : base;
       const dia = parseInt($("#f-dia", el).value, 10);
       const abre = () => { const d = $("details.dados", el); if (d) d.open = true; };
-      if (!nome) { abre(); return formErr(el, "#f-nome", "Escreva o nome da conta."); }
+      if (!base) { abre(); return formErr(el, "#f-nome", "Escreva o nome da conta."); }
       if (valor === null) return formErr(el, "#f-valor", "Digite o valor, por exemplo 120,00.");
       if (!(dia >= 1 && dia <= 31)) { abre(); return formErr(el, "#f-dia", "O dia tem que ser de 1 a 31."); }
       return { row: f ? f.row : null, antes: f ? f.nome : "", nome, dia, valor, saide, onde: $("#f-onde", el).value.trim() };
