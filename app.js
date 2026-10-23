@@ -658,14 +658,9 @@ function renderBanner() {
   } else if (!Token.get() && S.m) {
     b.innerHTML = `<span>Mostrando os últimos valores guardados. Entre de novo para atualizar.</span><button id="relogin">Entrar</button>`;
     b.hidden = false; $("#relogin").onclick = () => googleLogin();
-  } else if (foraDoMes()) {
-    // Fechar o mês já deixa a planilha no mês seguinte, então só avisa quando está fora de "este mês ou o próximo"
-    const h = mesDeHoje();
-    b.innerHTML = `<span>A planilha está em <b>${esc(titleCase(S.m.cur.nome))}</b> para todo mundo. Hoje é ${esc(titleCase(h.nome).split(" ")[0].toLowerCase())}.</span><button id="volta-mes">Voltar para ${esc(titleCase(h.nome).split(" ")[0])}</button>`;
-    b.hidden = false; $("#volta-mes").onclick = () => mudaMes(0, h);
   } else b.hidden = true;
 }
-const foraDoMes = () => { const h = mesDeHoje(); return !!(S.m && S.m.cur && h && (S.m.cur.idx < h.idx || S.m.cur.idx > h.idx + 1)); };
+// (o aviso "A planilha está em … Voltar para …" foi tirado a pedido em 23/10/2026: o mês só muda pelas setas)
 function renderStatus() {
   const el = $(".status"); if (!el) return;
   el.classList.toggle("spin", S.loading);
@@ -1636,7 +1631,6 @@ const mudaMes = async (d, alvo) => {
   if (await run("setMes", { label: x.label }, { busyText: "Trocando o mês…" })) toast(`A planilha agora está em ${titleCase(x.nome)}.`);
 };
 // Mês do calendário (mesma conta de idx da aba Tabelas: ano*12 + mês + 1)
-const mesDeHoje = () => { const d = new Date(); return monthByIdx(d.getFullYear() * 12 + d.getMonth() + 1); };
 $("#mes-prev").onclick = () => mudaMes(-1);
 $("#mes-next").onclick = () => mudaMes(1);
 // internet caiu / voltou: avisa no topo e, quando volta, atualiza os valores
