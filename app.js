@@ -844,6 +844,7 @@ function viewMais() {
 
     ${secHead("Planilha e conta", email ? esc(email) : "", "#868e96")}
     ${DEMO ? "" : `<a class="btn ghost" href="https://docs.google.com/spreadsheets/d/${esc(CFG.SPREADSHEET_ID)}/edit" target="_blank" rel="noopener">Abrir a planilha no Google</a>`}
+    ${DEMO ? "" : `<button class="btn ghost" data-act="atualizar-app"><svg><use href="#i-sync"/></svg>Atualizar o app</button>`}
     <button class="btn ghost" data-act="logout">Sair da conta</button>
     <p class="ver">Casa · versão ${esc(APP_VERSION)}</p>`;
 }
@@ -1287,6 +1288,7 @@ document.addEventListener("click", async e => {
       if (window.casaTema) window.casaTema();
       return render();
     }
+    case "atualizar-app": return atualizarApp();
     case "logout": {
       if (!(await confirmSheet("Sair da conta?", "Para usar de novo, é só entrar com o Google.", "Sair"))) return;
       const tok = Token.get();
@@ -1383,16 +1385,26 @@ const Demo = {
   }
 })();
 
+let swReg = null; // registro do service worker (para conferir versão nova)
 if ("serviceWorker" in navigator && !DEMO) {
   addEventListener("load", () => navigator.serviceWorker.register("sw.js").then(reg => {
-    // versão nova publicada → recarrega sozinho quando o app abrir de novo
-    reg.addEventListener("updatefound", () => {});
+    swReg = reg;
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch(() => {}));
+  // No iPhone o app volta do segundo plano sem recarregar: confere versão nova toda vez que ela abre o app
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && swReg) swReg.update().catch(() => {}); });
   let hadController = !!navigator.serviceWorker.controller;
   // versão nova: recarrega, mas nunca no meio de um formulário aberto (espera fechar)
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (hadController) { if ($("#sheet-root").classList.contains("open")) pendingReload = true; else location.reload(); }
+    if (hadController) { store.set("atualizou", 1); if ($("#sheet-root").classList.contains("open")) pendingReload = true; else location.reload(); }
     hadController = true;
   });
+  if (store.get("atualizou")) { store.del("atualizou"); setTimeout(() => toast("O app foi atualizado."), 600); }
+}
+
+// Botão "Atualizar o app" (Mais): busca a versão nova (o controllerchange recarrega); se não houver, só recarrega.
+async function atualizarApp() {
+  busy("Procurando versão nova…");
+  try { if (swReg) { await swReg.update(); if (swReg.installing || swReg.waiting) { setTimeout(() => location.reload(), 8000); return; } } } catch (_) {}
+  location.reload();
 }
