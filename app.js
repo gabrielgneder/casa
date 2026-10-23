@@ -762,8 +762,20 @@ function viewInicio() {
     <button class="btn ghost" data-act="tab" data-tab="contas">Ver todas as contas fixas</button>`;
 }
 
+// fatura do mês (bloco FATURAS DOS CARTÕES) de um cartão
+const fatDe = c => S.m.faturas.find(x => norm(x.nome) === norm(c.nome)) || null;
+// botão de pagar a fatura embaixo do cartão: "Pagar R$ X" ou o carimbo PAGO (tocar abre para desmarcar)
+function pagaFaturaHtml(c) {
+  const f = fatDe(c);
+  if (!f || !(num(f.valor) > 0 || f.pago)) return "";
+  const dif = f.pago ? Math.round((num(f.valor) - num(f.pago.valor)) * 100) / 100 : 0;
+  if (f.pago && dif <= 0) return `<button class="cc-paga feito" data-act="pagar-fatura" data-card="${esc(f.nome)}"><span class="carimbo">Pago</span><span>${brl(f.pago.valor)}${typeof f.pago.data === "number" ? ` · dia ${esc(fmtDate(f.pago.data, "short"))}` : ""}</span></button>`;
+  return `<button class="cc-paga" data-act="pagar-fatura" data-card="${esc(f.nome)}">${dif > 0 ? `Pagar a diferença · ${brl(dif)}` : `Pagar a fatura · ${brl(f.valor)}`}</button>`;
+}
 function ccHtml(c, big) {
+  const f = fatDe(c), pago = f && f.pago && num(f.valor) - num(f.pago.valor) <= 0.004;
   return `<button class="cc ${big ? "cc-big" : ""}" data-act="open-card" data-card="${esc(c.nome)}" style="${cardStyle(c.nome)}">
+    ${pago ? `<span class="cc-carimbo" aria-label="fatura paga">Pago</span>` : ""}
     <span class="cc-top"><span class="cc-name">${esc(titleCase(c.nome))}</span><span class="cc-pill">melhor dia ${c.melhor}</span></span>
     <span class="cc-chip"></span>
     <span class="cc-lbl">Fatura de ${esc(mesCurto())}</span>
@@ -790,8 +802,8 @@ function viewCartoes() {
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-calendar"/></svg></span>
       <span><span class="bd-l">Hoje, o cartão que dá mais prazo é</span><b>${esc(titleCase(top.c.nome))}</b><span class="bd-s">paga só em ${esc(fmtDate(top.venc, "short"))} · ${top.dias} dias</span></span>
     </div>` : ""}
-    ${secHead("Meus cartões", `Toque num cartão para ver as compras · total ${brl(tot)}`, "#5c7cfa")}
-    <div class="wallet">${m.cartoes.map(c => ccHtml(c)).join("")}</div>
+    ${secHead("Meus cartões", `Toque num cartão para ver as compras · toque em Pagar quando pagar a fatura · total ${brl(tot)}`, "#5c7cfa")}
+    <div class="wallet">${m.cartoes.map(c => `<div class="cc-wrap">${ccHtml(c)}${pagaFaturaHtml(c)}</div>`).join("")}</div>
     ${secHead("Melhor dia para comprar", "Toque num cartão para mudar o melhor dia deste mês", "#2f9e44")}
     <div class="list">${linhas}</div>
     <p class="ver">O melhor dia muda todo mês. Os dias de prazo são contados até o vencimento “regra” do cartão.</p>`;
@@ -846,15 +858,13 @@ function viewCartao() {
       ${futuras.length ? `${secHead("Já lançadas para depois", "", "#868e96")}<div class="list">${futuras.map(compraHtml).join("")}</div>` : ""}`;
   }).join("");
   return `<button class="back" data-act="tab" data-tab="cartoes"><svg><use href="#i-left"/></svg>Todos os cartões</button>
-    <div class="cc-solo">${ccHtml(c, true)}</div>
+    <div class="cc-solo">${ccHtml(c, true)}${pagaFaturaHtml(c)}</div>
     <div class="facts">
       <div><span>Vence</span><b>${esc(fmtDate(c.venc, "dow"))}</b></div>
       <div><span>Melhor dia</span><b>dia ${c.melhor}</b></div>
       <div><span>Compra hoje cai em</span><b>${esc(hoje ? titleCase(hoje.nome).split(" ")[0] : c.hoje)}</b></div>
     </div>
     <button class="btn" data-act="nova-compra" data-card="${esc(c.nome)}"><svg><use href="#i-plus"/></svg>Lançar compra neste cartão</button>
-    ${(() => { const f = m.faturas.find(x => norm(x.nome) === norm(c.nome)); if (!f || !(num(f.valor) > 0 || f.pago)) return "";
-      return `<button class="btn ghost" data-act="pagar-fatura" data-card="${esc(f.nome)}">${f.pago ? `✓ Fatura paga${typeof f.pago.data === "number" ? ` dia ${esc(fmtDate(f.pago.data, "short"))}` : ""}` : `Paguei a fatura (${brl(f.valor)})`}</button>`; })()}
     ${blocos}
     <div class="legend"><span><i class="lg parc"></i>parcelado</span><span><i class="lg ultima"></i>última parcela</span><span><i class="lg fixo"></i>todo mês</span><span><i class="lg vista"></i>à vista</span></div>
     <button class="btn ghost" data-act="edit-cartao" data-card="${esc(c.nome)}">Mudar melhor dia ou vencimento</button>`;
@@ -932,7 +942,7 @@ function linhaConta({ f, fat, venc, dif }, sub) {
 }
 function pagarHtml(x) {
   const f = x.f, fat = x.tipo === "fatura", cartao = !fat && f.saide === "NO CARTÃO";
-  const sub = x.dif ? `já pagou ${brl(f.pago.valor)} · entrou compra depois`
+  const sub = x.dif ? `já pagou ${brl(f.pago.valor)} · falta o resto`
     : cartao ? "paga no cartão · escolher qual"
     : `${x.venc ? `vence ${esc(fmtDate(x.venc, "short"))} · ` : ""}${saideChip(f.saide)}`;
   return linhaConta({ f, fat, venc: x.venc, dif: x.dif }, sub);
@@ -1457,23 +1467,33 @@ function fixaSheet(f) {
   });
 }
 
-// Fatura do cartão: "Paguei" tira o valor da fatura do dinheiro disponível.
+// Fatura do cartão: "Confirmar: paguei" tira do dinheiro disponível o valor pago (vem preenchido com a
+// fatura e pode mudar). Se pagou menos, ou entrou compra depois, a diferença volta para "Para pagar".
 function faturaSheet(f) {
   const p = f.pago, dif = p ? Math.round((num(f.valor) - num(p.valor)) * 100) / 100 : 0;
+  const sugere = p ? (dif > 0 ? num(f.valor) : num(p.valor)) : num(f.valor);
   openSheet(`Fatura ${titleCase(f.nome)}`, `
     <div class="recibo-linha">
       ${miniCard(f.nome)}
       <div class="recibo-main"><b>Fatura de ${esc(mesCurto())}</b><span>vence ${esc(fmtDate(f.venc, "dow"))} · ${saideChip(f.saide)}</span></div>
       <div class="recibo-v">${brl(f.valor)}</div>
     </div>
-    ${p ? `<div class="pago-box"><b>✓ Paga${typeof p.data === "number" ? ` dia ${esc(fmtDate(p.data, "short"))}` : ""}</b>: ${brl(p.valor)} já saiu do dinheiro disponível.${dif > 0 ? `<br>Depois disso entrou mais <b>${brl(dif)}</b> nesta fatura.` : ""}</div>`
-      : `<p class="tip">Pagou a fatura no aplicativo do banco? Toque em <b>Paguei</b>: o valor sai do dinheiro disponível.</p>`}
+    ${p ? `<div class="pago-box"><b>✓ Paga${typeof p.data === "number" ? ` dia ${esc(fmtDate(p.data, "short"))}` : ""}</b>: ${brl(p.valor)} já saiu do dinheiro disponível.${dif > 0 ? `<br>Ainda falta <b>${brl(dif)}</b> desta fatura.` : ""}</div>`
+      : `<p class="tip">Pagou a fatura no aplicativo do banco? Confira o valor e toque em <b>Confirmar</b>: ele sai do dinheiro disponível.</p>`}
+    <label class="field"><span>${p ? "Valor pago no total" : "Quanto pagou"}</span><input class="input money" id="f-valor" inputmode="decimal" value="${esc(moneyInput(sugere))}">
+      <small>Fatura: ${brl(f.valor)}</small></label>
     <div class="stack">
-      ${!p ? `<button class="btn big" id="f-pagar">Paguei ${brl(f.valor)}</button>` : dif > 0 ? `<button class="btn big" id="f-pagar">Paguei a diferença (${brl(dif)})</button>` : ""}
+      <button class="btn big" id="f-ok"></button>
       <button class="btn ghost" id="f-ver">Ver as compras do cartão</button>
       ${p ? `<button type="button" class="linkbtn" id="f-despagar">Desmarcar: ainda não paguei</button>` : ""}</div>`, (el, close) => {
-    const pg = $("#f-pagar", el);
-    if (pg) pg.onclick = () => salvarDaFolha(el, close, () => run("pagaFatura", { nome: f.nome, valor: num(f.valor), data: p ? p.data : todaySerial(), pago: true }), pg);
+    const b = $("#f-ok", el), inp = $("#f-valor", el);
+    const upd = () => { const v = parseMoney(inp.value); b.textContent = p ? `Salvar: paguei ${v ? brl(v) : ""}` : `Confirmar: paguei ${v ? brl(v) : ""}`; };
+    inp.oninput = upd; upd();
+    b.onclick = () => {
+      const v = parseMoney(inp.value);
+      if (!v || v <= 0) return formErr(el, "#f-valor", "Digite quanto pagou, por exemplo 377,22.");
+      salvarDaFolha(el, close, () => run("pagaFatura", { nome: f.nome, valor: v, data: p ? p.data : todaySerial(), pago: true }));
+    };
     $("#f-ver", el).onclick = () => { close(); const c = S.m.cartoes.find(x => norm(x.nome) === norm(f.nome)); if (c) { S.card = c.nome; S.tab = "cartao"; } else S.tab = "cartoes"; render(); scrollTo({ top: 0 }); };
     const dp = $("#f-despagar", el);
     if (dp) dp.onclick = () => salvarDaFolha(el, close, () => run("pagaFatura", { nome: f.nome, pago: false }), dp);

@@ -543,3 +543,12 @@ details.dados[open] > summary::after { content: "▴"; }
 .carimbo { display: inline-block; padding: 3px 10px; border: 2.5px solid var(--good); border-radius: 8px; color: var(--good); font-weight: 900; font-size: .86rem; letter-spacing: .1em; text-transform: uppercase; transform: rotate(-7deg); }
 .linha.ok .item-t { color: var(--ink-2); }
 .linha.ok .paga-v { color: var(--good); }
+
+/* pagar a fatura: botão embaixo de cada cartão; paga = carimbo no cartão e embaixo */
+.cc-wrap { display: grid; gap: 8px; }
+.cc { position: relative; }
+.cc-paga { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 16px; border: 0; border-radius: 16px; background: var(--brand); color: var(--on-brand); font: inherit; font-weight: 800; font-size: 1rem; }
+.cc-paga:active { transform: scale(.985); }
+.cc-paga.feito { background: var(--s1-bg); color: var(--good); }
+.cc-solo .cc-paga { margin-top: 10px; min-height: 60px; font-size: 1.08rem; }
+.cc-carimbo { position: absolute; right: 18px; top: 46%; z-index: 2; padding: 4px 14px; border: 3px solid #fff; border-radius: 10px; background: rgba(21, 108, 70, .88); color: #fff; font-weight: 900; font-size: 1.15rem; letter-spacing: .14em; text-transform: uppercase; transform: rotate(-9deg); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
