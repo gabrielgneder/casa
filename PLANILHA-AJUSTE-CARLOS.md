@@ -1,5 +1,10 @@
 # Ajuste da planilha: dinheiro que o Carlos manda no meio do mês
 
+> **Já feito em 22/10/2026** (pelo Claude, via a API do app, logado como Gabriel), conferido com um envio de teste de R$ 1,00 e desfeito.
+> Antes de mexer foi criada a aba oculta **"CASA backup 22-10-2026"** com a CASA como estava. Para desfazer, use Arquivo → Histórico de versões, ou essa aba.
+> Atenção ao formato Brasil: nas fórmulas, os argumentos se separam com **;** (com vírgula dá "erro de análise").
+> O texto abaixo fica como registro do que foi feito.
+
 Faça **uma vez**, no Google Planilhas, logado numa conta que edita a "CASA 2026" (a do Gabriel serve). Leva uns 3 minutos. Faça num momento em que ninguém esteja lançando nada no app.
 
 Depois do ajuste, cada "O Carlos mandou dinheiro" lançado no app:

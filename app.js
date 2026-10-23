@@ -725,6 +725,15 @@ function viewCartao() {
     <button class="btn ghost" data-act="edit-cartao" data-card="${esc(c.nome)}">Mudar melhor dia ou vencimento</button>`;
 }
 
+// 2º dinheiro: quanto pedir ao Carlos para pagar os cartões e as contas do 2º sem faltar.
+// A Sobra final da planilha = 2º + outros + sobra do 1º − (cartões e contas do 2º); o que zera a sobra é 2º − sobra final.
+function pedir2o() {
+  const m = S.m, e2 = m.entradas.find(e => e.principal && e.row - m.ranges.rEnt === 2);
+  const valor = Math.max(0, Math.round((num(e2 && e2.valor) - num(m.sobraFinal)) * 100) / 100);
+  return { valor, faltam: m.fixas.filter(f => f.nome && f.valor === "").length };
+}
+const pedidoHtml = p => `Para pagar os cartões e as contas do 2º dinheiro sem faltar, peça ao Carlos <b>${brl(p.valor)}</b>.`
+  + (p.faltam ? ` <br>Ainda faltam lançar <b>${p.faltam} conta${p.faltam > 1 ? "s" : ""} fixa${p.faltam > 1 ? "s" : ""}</b>: esse valor vai subir quando lançar.` : "");
 const envioHtml = e => `<button class="item" data-act="edit-envio-carlos" data-row="${e.row}">
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
       <span class="item-main"><span class="item-t">O Carlos mandou</span><span class="item-s">${typeof e.data === "number" ? `dia ${esc(fmtDate(e.data, "short"))} · ` : ""}pagamento da pensão</span></span>
@@ -735,7 +744,7 @@ function viewContas() {
     if (e.carlos) return envioHtml(e);
     const primeiro = e.row - m.ranges.rEnt === 1;
     const nome = e.principal ? (primeiro ? "1º dinheiro" : "2º dinheiro") : e.nome;
-    const sub = e.principal ? `${primeiro ? "chega no fim do mês" : "para os cartões"} · dia ${esc(fmtDate(e.data, "short"))}` : "entra junto com o 2º";
+    const sub = e.principal ? `${primeiro ? "pensão fixa do Carlos" : `para os cartões · pedir ${brl(pedir2o().valor)}`} · dia ${esc(fmtDate(e.data, "short"))}` : "entra junto com o 2º";
     return `<button class="item" data-act="edit-entrada" data-row="${e.row}">
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
       <span class="item-main"><span class="item-t">${esc(nome)}</span><span class="item-s">${sub}</span></span>
@@ -1149,11 +1158,13 @@ function fixaSheet(f) {
   });
 }
 
-function valorSheet(title, { nome, valor, nomeEditavel, onSave, onDel }) {
+function valorSheet(title, { nome, valor, nomeEditavel, onSave, onDel, dica, sugestao }) {
   openSheet(title, `
+    ${dica ? `<div class="tip">${dica}${typeof sugestao === "number" ? `<br><button type="button" class="linkbtn" id="f-usar">Usar ${brl(sugestao)}</button>` : ""}</div>` : ""}
     ${nomeEditavel ? `<label class="field"><span>Nome</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(nome || "")}"></label>` : ""}
     <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(moneyInput(valor))}"></label>
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${onDel ? `<button class="btn danger" id="f-del">Apagar</button>` : ""}</div>`, (el, close) => {
+    const usar = $("#f-usar", el); if (usar) usar.onclick = () => { const i = $("#f-valor", el); i.value = moneyInput(sugestao); i.dispatchEvent(new Event("input", { bubbles: true })); i.focus(); };
     $("#f-ok", el).onclick = () => {
       const v = parseMoney($("#f-valor", el).value), n = nomeEditavel ? $("#f-nome", el).value.trim().toUpperCase() : nome;
       if (nomeEditavel && !n) return formErr(el, "#f-nome", "Escreva o nome.");
@@ -1216,8 +1227,11 @@ document.addEventListener("click", async e => {
     case "nova-fixa": return fixaSheet(null);
     case "edit-entrada": {
       const en = m.entradas.find(x => x.row === row);
+      const segundo = en.principal && row - m.ranges.rEnt === 2;
+      const pede = segundo ? pedir2o() : null;
       return valorSheet(en.principal ? (row - m.ranges.rEnt === 1 ? "1º dinheiro" : "2º dinheiro") : "Outro valor", {
         nome: en.nome, valor: en.valor, nomeEditavel: !en.principal,
+        dica: segundo ? pedidoHtml(pede) : (en.principal ? "A parte fixa da pensão do Carlos." : null), sugestao: segundo ? pede.valor : undefined,
         onSave: (n, v) => run("saveEntrada", { row, nome: n, valor: v, principal: en.principal }),
         onDel: en.principal ? null : () => run("saveEntrada", { row, nome: "", valor: "", principal: false }),
       });

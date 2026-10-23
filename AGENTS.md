@@ -21,7 +21,9 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 - **Contas fixas:** a Rosany lança o valor certo todo mês. O **Fechar o mês** deixa só a coluna Valor (C) em branco; nome, dia, "sai de" e "onde pagar" ficam. O app mostra "Lançar" e o valor do mês passado (lido do topo de ANTERIORES).
 - **Pensão do Carlos = 5.000 fixos + contas extras.** Tudo que ele manda é pagamento da pensão.
   - **Extra do Carlos** (compra que ele paga, fora dos cartões): no botão Compra → "Extra do Carlos". Vai para o bloco "O QUE O CARLOS DÁ" com `EXTRA` na coluna B e sai no fechamento. Itens sem `EXTRA` (Netflix, INSS…) são fixos e ficam.
-  - **Dinheiro que o Carlos mandou no meio do mês:** linha `CARLOS` nas "outras entradas" (B = data, C = valor). Soma na Sobra final e, depois do ajuste da planilha descrito em `PLANILHA-AJUSTE-CARLOS.md`, abate da diferença do Carlos. Sai no fechamento.
+  - **Dinheiro que o Carlos mandou no meio do mês:** linha `CARLOS` nas "outras entradas" (B = data, C = valor). Soma na Sobra final e abate (ajuste da planilha em `PLANILHA-AJUSTE-CARLOS.md`, já feito) da diferença do Carlos. Sai no fechamento.
+  - **2º dinheiro é variável:** o app sugere quanto pedir ao Carlos = 2º dinheiro atual − Sobra final (o que zera a sobra).
+- Planilha ajustada em 22/10/2026 (6 linhas em ENTRADAS, fórmulas da Sobra final e do "Entrou do Carlos"); backup oculto "CASA backup 22-10-2026". Fórmulas na planilha são no formato Brasil (separador `;`).
 
 ## Arquivos
 
