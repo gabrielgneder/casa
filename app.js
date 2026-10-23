@@ -606,17 +606,20 @@ function viewInicio() {
         <span class="item-s">vence ${esc(fmtDate(f.venc, "dow"))} · ${saideChip(f.saide)}</span></span>
       <span class="item-v">${brl(f.valor)}</span>
     </button>`).join("");
+  const c = contaMes(m);
   return `
     <section class="hero ${neg ? "neg" : ""}">
-      <div class="hero-lbl">${neg ? "Vai faltar no fim do mês" : "Sobra final do mês"}</div>
+      <div class="hero-lbl">${neg ? "Passou do que tinha este mês" : "Pode gastar este mês"}</div>
       <div class="hero-big">${brl(m.sobraFinal)}</div>
-      <div class="hero-sub">2º dinheiro + o que sobrou do 1º, menos as contas do 2º</div>
-      <div class="hero-row">
-        <div><span>Sobra do 1º dinheiro</span><b>${brl(m.sobra1)}</b></div>
-        <div><span>Entrou no mês</span><b>${brl(m.totalEntrou)}</b></div>
-      </div>
+      <div class="hero-sub">Diminui a cada compra que lançar</div>
+      <dl class="conta">
+        <div><dt>Dinheiro que entrou</dt><dd>${brl(c.entrou)}</dd></div>
+        <div><dt>− Contas fixas</dt><dd>${brl(c.fixas)}</dd></div>
+        <div><dt>− Parcelas que continuam</dt><dd>${brl(c.parcelas)}</dd></div>
+        <div><dt>− Compras novas do mês</dt><dd>${brl(c.novas)}</dd></div>
+        <div class="tot"><dt>= ${neg ? "Falta" : "Pode gastar"}</dt><dd>${brl(m.sobraFinal)}</dd></div>
+      </dl>
     </section>
-    ${freeHtml(gastoCartao(m))}
     ${m.alerta ? `<div class="alert"><svg><use href="#i-info"/></svg>${esc(m.alerta)}</div>` : ""}
     ${secHead("Faturas dos cartões", `${m.faturas.length} cartões · total ${brl(totFat)}`, "#5c7cfa")}
     <div class="list">${fat || `<div class="empty">Nenhuma fatura.</div>`}</div>
@@ -731,31 +734,18 @@ function pedir2o() {
 }
 const pedidoHtml = p => `Para pagar os cartões e as contas do 2º dinheiro sem faltar, peça ao Carlos <b>${brl(p.valor)}</b>.`
   + (p.faltam ? ` <br>Ainda faltam lançar <b>${p.faltam} conta${p.faltam > 1 ? "s" : ""} fixa${p.faltam > 1 ? "s" : ""}</b>: esse valor vai subir quando lançar.` : "");
-// Quanto ela ainda pode gastar no cartão neste mês.
-// limite = "Previsto livre p/ cartão" da planilha (entrou − contas fixas − parcelas que já vinham de antes);
-// usado = compras novas dela que entram na fatura deste mês (1ª fatura = este mês). As do "Nubank do Carlos"
-// não entram: ele paga a mais no mês seguinte. (Nas listas sem Carlos dá o mesmo que fatura − "Já previsto".)
-function gastoCartao(m) {
-  const limite = num(m.previsto), cur = m.cur ? m.cur.idx : null;
-  let usado = 0;
-  if (cur !== null) for (const l of m.listas) if (!/CARLOS/.test(norm(l.nome)))
-    for (const it of l.itens) if (num(it.noMes) > 0 && num(it.ini) >= cur) usado += num(it.noMes);
-  usado = Math.round(usado * 100) / 100;
-  return { limite, usado, resta: Math.round((limite - usado) * 100) / 100 };
-}
-function freeHtml({ limite, usado, resta }) {
-  const pct = limite > 0 ? Math.max(0, Math.min(100, resta / limite * 100)) : 0;
-  const [rotulo, valor, sub] = limite <= 0
-    ? ["Livre para gastar no cartão", brl(limite), "O dinheiro do mês já está todo comprometido."]
-    : resta < 0
-      ? ["Passou do previsto no cartão", brl(-resta), `Gastou ${brl(usado)} em compras novas; o previsto era ${brl(limite)}.`]
-      : ["Ainda pode gastar no cartão", brl(resta), `Já gastou ${brl(usado)} de ${brl(limite)} neste mês (fora as do Carlos)`];
-  return `<button class="free" data-act="tab" data-tab="cartoes">
-      <span class="free-ic"><svg><use href="#i-card"/></svg></span>
-      <span class="free-main"><span class="free-l">${rotulo}</span><span class="free-v ${resta < 0 || limite <= 0 ? "neg" : ""}">${valor}</span>
-        ${limite > 0 ? `<span class="free-bar" aria-hidden="true"><i style="width:${pct.toFixed(1)}%"></i></span>` : ""}
-        <span class="free-s">${sub}</span></span>
-    </button>`;
+// A conta do verde, do jeito que a Rosany pensa: entrou − contas fixas − parcelas que já vinham − compras novas.
+// É a mesma da "Sobra final" da planilha (entradas − faturas e contas do 1º e do 2º dinheiro); o valor grande é o da planilha.
+function contaMes(m) {
+  const r = x => Math.round(x * 100) / 100, paga = x => x === "1º DINHEIRO" || x === "2º DINHEIRO";
+  const fat = m.faturas.filter(f => paga(f.saide));
+  const parcelas = r(fat.reduce((a, f) => a + num(f.previsto), 0));
+  return {
+    entrou: r(m.entradas.reduce((a, e) => a + num(e.valor), 0)),
+    fixas: r(m.fixas.filter(f => paga(f.saide)).reduce((a, f) => a + num(f.valor), 0)),
+    parcelas,
+    novas: r(fat.reduce((a, f) => a + num(f.valor), 0) - parcelas),
+  };
 }
 const envioHtml = e => `<button class="item" data-act="edit-envio-carlos" data-row="${e.row}">
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
@@ -796,8 +786,7 @@ function viewContas() {
     ${secHead("Resultado do mês", "", "#2f9e44")}
     <div class="result">
       <div><span>Sobra do 1º dinheiro</span><b>${brl(m.sobra1)}</b><small>passa para o 2º</small></div>
-      <div class="${neg ? "neg" : "pos"}"><span>${neg ? "Falta no fim do mês" : "Sobra final do mês"}</span><b>${brl(m.sobraFinal)}</b></div>
-      <div class="yel"><span>Livre p/ gastar no cartão</span><b>${brl(m.previsto)}</b><small>previsto no começo do mês</small></div>
+      <div class="${neg ? "neg" : "pos"}"><span>${neg ? "Passou do que tinha este mês" : "Pode gastar este mês"}</span><b>${brl(m.sobraFinal)}</b></div>
     </div>`;
 }
 

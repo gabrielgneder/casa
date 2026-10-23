@@ -24,7 +24,7 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
   - **Dinheiro que o Carlos mandou no meio do mês:** linha `CARLOS` nas "outras entradas" (B = data, C = valor). Soma na Sobra final e abate (ajuste da planilha em `PLANILHA-AJUSTE-CARLOS.md`, já feito) da diferença do Carlos. Sai no fechamento.
   - **2º dinheiro é variável:** o app sugere quanto pedir ao Carlos = 2º dinheiro atual − Sobra final (o que zera a sobra).
 - Planilha ajustada em 22/10/2026 (6 linhas em ENTRADAS, fórmulas da Sobra final e do "Entrou do Carlos"); backup oculto "CASA backup 22-10-2026". Fórmulas na planilha são no formato Brasil (separador `;`). O "Previsto livre p/ cartão" (C57) também soma os envios do Carlos.
-- **Barra "Ainda pode gastar no cartão" (Início):** total = Previsto livre p/ cartão; já gastou = compras novas dela que entram na fatura deste mês (1ª fatura = este mês), **sem a lista "Nubank do Carlos"** (ele paga a mais no mês seguinte); resta = total − já gastou.
+- **Verde do Início = "Pode gastar este mês"** = Sobra final da planilha (pedido da Rosany em 22/10/2026). Embaixo do valor, a conta linha a linha (`contaMes()`): dinheiro que entrou − contas fixas − parcelas que continuam (coluna "Já previsto" das faturas) − compras novas do mês. Cada compra lançada diminui o verde. A antiga barra amarela "Ainda pode gastar no cartão" (baseada no "Previsto livre p/ cartão") foi tirada: dois números parecidos e diferentes confundiam. Não criar outro número de "quanto pode gastar".
 - **1º dinheiro = 5.000** (parte fixa). Se ele mandar mais junto, a diferença vai como "O Carlos mandou dinheiro" (ex.: 31/10/2026, 5.500 = 5.000 + 500).
 
 ## Arquivos
