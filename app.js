@@ -319,7 +319,27 @@ async function garanteFixTab() {
 // lê de novo, na planilha, o mês da tela e as contas fixas (nome e valor)
 async function fixasAgora() {
   const [g, rows] = await Promise.all([readGrid(), lerFixMesSeguro()]), m = parse(g);
-  return { m, rows, fixas: m.fixas.filter(f => f.nome) };
+  return { m, rows, fixas: doMes(m) };
+}
+// O 1º e o 2º dinheiro também são de cada mês (pedido de 23/10/2026): guardados na mesma aba FIXAS POR MÊS
+// com o nome "ENTRADA 1º DINHEIRO" / "ENTRADA 2º DINHEIRO"; mês novo começa em branco para ela lançar.
+const ENTRADA = ["ENTRADA 1º DINHEIRO", "ENTRADA 2º DINHEIRO"];
+const entradasDoMes = m => m.entradas.filter(e => e.principal).map(e => ({ row: e.row, nome: ENTRADA[e.row - m.ranges.rEnt - 1], valor: e.valor }));
+// tudo o que muda de mês para mês na coluna C: contas fixas + 1º e 2º dinheiro
+const doMes = m => m.fixas.filter(f => f.nome).concat(entradasDoMes(m));
+// Uma vez só: quando isto foi feito a planilha estava em dez/26 mostrando o 1º e o 2º de nov/26.
+// Guarda esses valores como nov/26 e deixa dez/26 em branco (só se ainda não houver nenhuma entrada guardada).
+async function migraEntradas() {
+  if (DEMO || !S.m || norm(S.m.mes) !== norm("dez/26") || store.get("migrouEntradas")) return;
+  const rows = await lerFixMesSeguro();
+  if (rows.some(r => ENTRADA.some(k => norm(k) === norm(r[1])))) { store.set("migrouEntradas", 1); return; }
+  const ent = entradasDoMes(S.m).filter(e => e.valor !== "");
+  if (ent.length) {
+    await gravaFixMes(rows.concat(ent.map(e => ["nov/26", e.nome, e.valor])));
+    await writeRaw(ent.map(e => ({ range: `CASA!C${e.row}`, values: [[""]] })));
+  }
+  store.set("migrouEntradas", 1);
+  await refresh({ quiet: true });
 }
 // troca, na lista guardada, os valores do mês `mes` pelos que estão na coluna C agora
 function guardaMes(rows, mes, fixas) {
@@ -616,7 +636,7 @@ async function fecharMes() {
   for (const c of m.cartoes) data.push({ range: `CASA!H${c.row}`, values: [[""]] });
   // 4) contas fixas: os valores do mês ficam guardados em FIXAS POR MÊS; o mês seguinte começa zerado
   //    (ou com o que já tiver sido lançado para ele)
-  const fixas = m.fixas.filter(f => f.nome), guardadas = guardaMes(await lerFixMesSeguro(), m.mes, fixas);
+  const fixas = doMes(m), guardadas = guardaMes(await lerFixMesSeguro(), m.mes, fixas);
   await gravaFixMes(guardadas);
   data.push(...valoresDoMes(guardadas, prox.label, fixas));
   // 5) extras do Carlos e dinheiro que ele mandou no meio do mês: eram deste mês, saem
@@ -966,11 +986,11 @@ function viewContas() {
     if (e.carlos) return envioHtml(e);
     const primeiro = e.row - m.ranges.rEnt === 1;
     const nome = e.principal ? (primeiro ? "1º dinheiro" : "2º dinheiro") : e.nome;
-    const sub = e.principal ? `${primeiro ? "pensão fixa do Carlos" : `para os cartões · pedir ${brl(pedir2o().valor)}`} · dia ${esc(fmtDate(e.data, "short"))}` : "entra junto com o 2º";
+    const sub = e.principal ? `${primeiro ? "pensão fixa do Carlos" : (e.valor === "" ? "para os cartões" : `para os cartões · pedir ${brl(pedir2o().valor)}`)} · dia ${esc(fmtDate(e.data, "short"))}` : "entra junto com o 2º";
     return `<button class="item" data-act="edit-entrada" data-row="${e.row}">
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
       <span class="item-main"><span class="item-t">${esc(nome)}</span><span class="item-s">${sub}</span></span>
-      <span class="item-v pos">${brl(e.valor)}</span></button>`;
+      <span class="item-v pos">${e.principal && e.valor === "" ? `<span class="lancar">Lançar</span>` : brl(e.valor)}</span></button>`;
   }).join("");
   const livreOutro = m.entradas.some(e => !e.principal && !e.nome && e.valor === "");
   const fixas = m.fixas.filter(f => f.nome || f.valor !== "");
@@ -1614,7 +1634,7 @@ document.addEventListener("click", async e => {
     case "edit-envio-carlos": return envioCarlosSheet(m.entradas.find(x => x.row === row));
     case "fechar": {
       const prox = m.cur ? monthByIdx(m.cur.idx + 1) : null;
-      if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>As compras que já acabaram saem das listas, os <b>valores das contas fixas</b> ficam guardados e o mês novo começa zerado, e os <b>extras do Carlos</b> e o dinheiro que ele mandou no mês saem.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
+      if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>As compras que já acabaram saem das listas, os <b>valores das contas fixas e do 1º e 2º dinheiro</b> ficam guardados e o mês novo começa zerado, e os <b>extras do Carlos</b> e o dinheiro que ele mandou no mês saem.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
         run("fecharMes", {}, { busyText: "Fechando o mês…" });
       return;
     }
@@ -1717,6 +1737,7 @@ const Demo = {
   if (oauth === "ok") await fetchEmail();
   if (DEMO || Token.get()) {
     await refresh({ quiet: !!S.m });
+    try { await migraEntradas(); } catch (e) {}
     const p = store.get("pending");
     if (p && OPS[p.op] && S.m) { store.del("pending"); run(p.op, p.args); }
   }
