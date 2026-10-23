@@ -553,3 +553,4 @@ details.dados[open] > summary::after { content: "▴"; }
 .cc-solo .cc-paga { margin-top: 10px; min-height: 60px; font-size: 1.08rem; }
 .cc-carimbo { position: absolute; right: 18px; top: 46%; z-index: 2; padding: 4px 14px; border: 3px solid #fff; border-radius: 10px; background: rgba(21, 108, 70, .88); color: #fff; font-weight: 900; font-size: 1.15rem; letter-spacing: .14em; text-transform: uppercase; transform: rotate(-9deg); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
 .choices.duas { grid-template-columns: 1fr 1fr; }
+.cardpick .pick-pix { box-shadow: inset 0 0 0 2px #12b886; }

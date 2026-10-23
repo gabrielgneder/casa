@@ -208,10 +208,13 @@ function parse(g) {
   const pagoDe = (tipo, nome) => m.pagos.find(x => x.tipo === tipo && norm(x.nome) === norm(nome)) || null;
   for (const f of m.fixas) f.pago = f.nome ? pagoDe("CONTA", f.nome) : null;
   for (const f of m.faturas) f.pago = pagoDe("FATURA", f.nome);
+  // compras pagas no Pix (TIPO = PIX): saem do dinheiro na hora; a planilha não sabe delas
+  m.pix = m.pagos.filter(x => x.tipo === "PIX");
+  m.totalPix = Math.round(m.pix.reduce((a, x) => a + num(x.valor), 0) * 100) / 100;
 
   // resultado
   const rRes = need(find(titulo("RESULTADO DO MÊS")), "RESULTADO DO MÊS");
-  m.sobra1 = v(rRes + 1, 3); m.sobraFinal = v(rRes + 2, 3); m.previsto = v(rRes + 3, 3);
+  m.sobra1 = v(rRes + 1, 3); m.sobraPlanilha = v(rRes + 2, 3); m.sobraFinal = Math.round((num(m.sobraPlanilha) - m.totalPix) * 100) / 100; m.previsto = v(rRes + 3, 3);
   m.alerta = String(v(rRes + 4, 1) || "");
 
   // Carlos
@@ -471,6 +474,25 @@ const OPS = {
     await mudaPag(m.mes, "CONTA", nome, [data, valor, lista, fat]);
     const l = m.listas.find(x => x.nome === lista), fm = monthByLabel(fat);
     return [`${titleCase(compra)} lançada no ${l ? l.label : lista}, fatura de ${fm ? titleCase(fm.nome).split(" ")[0].toLowerCase() : fat}.`, ...msgs].join(" ");
+  },
+  // Pix: uma linha por pagamento em PAGAMENTOS (mesmo nome pode repetir no mês)
+  async addPix({ nome, valor, data }) {
+    const rows = (await existeAba(PAGTAB)) ? await lerPag() : [];
+    await gravaPag(rows.filter(r => r[0] !== undefined && r[0] !== "").concat([[S.m.mes, "PIX", nome, data, valor, "", ""]]));
+    return `Pix anotado: ${brl(valor)} saiu do dinheiro disponível.`;
+  },
+  async delPix({ nome, valor, data }) {
+    const rows = ((await existeAba(PAGTAB)) ? await lerPag() : []).filter(r => r[0] !== undefined && r[0] !== "");
+    const i = rows.findIndex(r => norm(r[0]) === norm(S.m.mes) && norm(r[1]) === "PIX" && norm(r[2]) === norm(nome) && num(r[4]) === num(valor) && String(r[3]) === String(data));
+    if (i < 0) throw new Error("Esse Pix mudou na planilha (talvez outra pessoa mexeu). Atualizei a tela, tente de novo.");
+    rows.splice(i, 1);
+    await gravaPag(rows);
+    return "Pix apagado.";
+  },
+  async editPix({ antes, nome, valor, data }) {
+    await OPS.delPix(antes);
+    await OPS.addPix({ nome, valor, data });
+    return "Pix alterado.";
   },
   async pagaFatura({ nome, valor, data, pago }) {
     await mudaPag(S.m.mes, "FATURA", nome, pago ? [data, valor, "", ""] : null);
@@ -935,6 +957,8 @@ function caixa(m) {
   const porData = (a, b) => (a.venc ?? 1e9) - (b.venc ?? 1e9);
   aPagar.sort(porData); pagos.sort((a, b) => num(b.f.pago.data) - num(a.f.pago.data));
   const entrou = r(m.entradas.reduce((a, e) => a + num(e.valor), 0));
+  for (const p of m.pix) pagos.push({ tipo: "pix", f: { pago: p } });
+  pagos.sort((a, b) => num(b.f.pago.data) - num(a.f.pago.data));
   const pago = r(pagos.filter(x => !(x.tipo === "conta" && x.f.pago.lista)).reduce((a, x) => a + num(x.f.pago.valor), 0));
   const disp = r(entrou - pago);
   return { entrou, pago, disp, falta: r(disp - num(m.sobraFinal)), aPagar, pagos };
@@ -970,7 +994,14 @@ function pagarHtml(x) {
     : `${x.venc ? `${ehAnterior(f.nome) ? "venceu" : "vence"} ${esc(fmtDate(x.venc, "short"))} · ` : ""}${ehAnterior(f.nome) ? "paga atrasado · " : ""}${saideChip(f.saide)}`;
   return linhaConta({ f, fat, venc: x.venc, dif: x.dif }, sub);
 }
+// compra paga no Pix (linha do "Já paguei" e da aba Contas)
+const pixHtml = (p, i) => `<div class="linha ok">
+    <button class="item" data-act="edit-pix" data-i="${i}">
+      <span class="ico" style="--ic:#12b886"><svg><use href="#i-pix"/></svg></span>
+      <span class="item-main"><span class="item-t">${esc(p.nome)}</span><span class="item-s">Pix${typeof p.data === "number" ? ` · dia ${esc(fmtDate(p.data, "short"))}` : ""}</span></span>
+    </button><button class="paga feito" data-act="edit-pix" data-i="${i}" aria-label="${esc(p.nome)}: pago no Pix"><span class="paga-v">${brl(p.valor)}</span><span class="carimbo">Pix</span></button></div>`;
 function pagoHtml(x) {
+  if (x.tipo === "pix") return pixHtml(x.f.pago, S.m.pix.indexOf(x.f.pago));
   const f = x.f, fat = x.tipo === "fatura", l = !fat && f.pago.lista && S.m.listas.find(y => y.nome === f.pago.lista);
   const sub = l ? `${esc(l.label)} · fatura de ${esc(mesNome(f.pago.fat))}` : `${typeof f.pago.data === "number" ? `dia ${esc(fmtDate(f.pago.data, "short"))}` : "pago"}`;
   return linhaConta({ f, fat, venc: x.venc }, sub);
@@ -1018,6 +1049,8 @@ function viewContas() {
     ${secHead("Contas e cartões do mês", `${pend ? `<b>${pend} para lançar</b> · ` : ""}contas fixas ${brl(m.totalFixas)} · cartões ${brl(m.faturas.filter(f => pagaCom(f.saide)).reduce((a, f) => a + num(f.valor), 0))} · toque em Pagar quando pagar`, "#f59f00")}
     <div class="list">${fix || `<div class="empty">Nenhuma conta.</div>`}</div>
     <button class="btn ghost" data-act="nova-fixa"><svg><use href="#i-plus"/></svg>Nova conta</button>
+    ${m.pix.length ? `${secHead("Pagos no Pix", `${m.pix.length} · ${brl(m.totalPix)} · já saíram do dinheiro`, "#12b886")}<div class="list">${m.pix.map(pixHtml).join("")}</div>` : ""}
+    <button class="btn ghost" data-act="novo-pix"><svg><use href="#i-plus"/></svg>Paguei no Pix</button>
     ${secHead("Resultado do mês", "", "#2f9e44")}
     <div class="result">
       <div><span>Sobra do 1º dinheiro</span><b>${brl(m.sobra1)}</b><small>passa para o 2º</small></div>
@@ -1203,9 +1236,11 @@ function compraSheet({ cardNome, item }) {
 
   let extra = false; // compra que o Carlos paga, fora dos cartões
   const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" aria-pressed="${!!(lista && lista.nome === l.nome)}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("")
-    + (item ? "" : `<button type="button" class="pick-extra" data-lista="__extra" aria-pressed="false">Extra do Carlos<small>não é cartão</small></button>`);
+    + (item ? "" : `<button type="button" class="pick-extra pick-pix" data-lista="__pix" aria-pressed="false">Pix<small>sai do dinheiro</small></button><button type="button" class="pick-extra" data-lista="__extra" aria-pressed="false">Extra do Carlos<small>não é cartão</small></button>`);
+  let pix = false; // pago no Pix: sai do dinheiro disponível na hora
   const body = `
-    <div class="field"><span id="g-cartao">Cartão</span><div class="cardpick" role="group" aria-labelledby="g-cartao">${pick}</div></div>
+    <div class="field"><span id="g-cartao">${item ? "Cartão" : "Como pagou"}</span><div class="cardpick" role="group" aria-labelledby="g-cartao">${pick}</div></div>
+    <p class="tip" id="f-pix-tip" hidden>Pago no Pix: sai do <b>dinheiro disponível</b> na hora. Fica em Contas → “Pagos no Pix”.</p>
     <p class="tip" id="f-extra-tip" hidden>O Carlos paga esta compra para você: soma no <b>Total do Carlos</b> deste mês e sai quando fechar o mês.</p>
     <label class="field"><span>O que comprou</span><input class="input" id="f-nome" autocomplete="off" autocapitalize="characters" value="${esc(item ? item.nome : "")}" placeholder="ex.: MERCADO"></label>
     <div class="so-cartao">
@@ -1215,8 +1250,8 @@ function compraSheet({ cardNome, item }) {
     </div>
     <label class="field"><span id="lbl-valor">Valor</span><input class="input money" id="f-valor" inputmode="decimal" autocomplete="off" placeholder="ex.: 49,90" value="${esc(item ? moneyInput(item.valor) : "")}">
       <small id="f-total"></small></label>
+    <label class="field" id="f-data-box"><span id="lbl-data">Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
     <div class="so-cartao">
-    <label class="field"><span>Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
     <div class="field"><span id="g-fat">Entra na fatura de</span>
       <div class="tip" id="f-best"></div>
       <div class="choices" id="f-fat-opts" role="group" aria-labelledby="g-fat"></div>
@@ -1230,8 +1265,9 @@ function compraSheet({ cardNome, item }) {
     const upd = () => {
       $("#parc-box", el).hidden = tipo !== "parc";
       $("#f-n", el).textContent = nParc;
-      $("#lbl-valor", el).textContent = extra ? "Valor" : tipo === "parc" ? "Valor de CADA parcela" : tipo === "fixo" ? "Valor por mês" : "Valor";
-      $$(".so-cartao", el).forEach(x => x.hidden = extra); $("#f-extra-tip", el).hidden = !extra;
+      $("#lbl-valor", el).textContent = extra || pix ? "Valor" : tipo === "parc" ? "Valor de CADA parcela" : tipo === "fixo" ? "Valor por mês" : "Valor";
+      $$(".so-cartao", el).forEach(x => x.hidden = extra || pix); $("#f-extra-tip", el).hidden = !extra; $("#f-pix-tip", el).hidden = !pix;
+      $("#f-data-box", el).hidden = extra; $("#lbl-data", el).textContent = pix ? "Dia que pagou" : "Data da compra";
       const v = parseMoney($("#f-valor", el).value);
       $("#f-total", el).textContent = !extra && tipo === "parc" && v ? `Total da compra: ${brl(v * nParc)} (${nParc}× ${brl(v)})` : "";
       const c = cardOf(), auto = monthByLabel(autoFat());
@@ -1246,8 +1282,8 @@ function compraSheet({ cardNome, item }) {
       $("#f-fat-sel", el).value = fat;
     };
     $$("[data-lista]", el).forEach(b => b.onclick = () => {
-      extra = b.dataset.lista === "__extra";
-      lista = extra ? null : m.listas.find(l => l.nome === b.dataset.lista);
+      extra = b.dataset.lista === "__extra"; pix = b.dataset.lista === "__pix";
+      lista = extra || pix ? null : m.listas.find(l => l.nome === b.dataset.lista);
       marca($$("[data-lista]", el), b);
       if (!fatManual) fat = autoFat();
       upd();
@@ -1262,9 +1298,10 @@ function compraSheet({ cardNome, item }) {
     $("#f-ok", el).onclick = async () => {
       const nome = $("#f-nome", el).value.trim().toUpperCase();
       const valor = parseMoney($("#f-valor", el).value);
-      if (!lista && !extra) return formErr(el, ".cardpick button", "Escolha o cartão (ou “Extra do Carlos”, se não foi no cartão).");
+      if (!lista && !extra && !pix) return formErr(el, ".cardpick button", "Escolha o cartão, o Pix ou o “Extra do Carlos”.");
       if (!nome) return formErr(el, "#f-nome", "Escreva o que comprou.");
       if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 49,90.");
+      if (pix) return salvarDaFolha(el, close, () => run("addPix", { nome, valor, data: dataSerial }));
       if (extra) {
         if (await salvarDaFolha(el, close, () => run("addExtraCarlos", { nome, valor }, { quieto: true }))) reciboExtra({ nome, valor, row: OPS.ultimaLinha });
         return;
@@ -1359,6 +1396,29 @@ function reciboExtra({ nome, valor, row }) {
       close();
       if (await run("delCarlos", { row, antes: nome }, { quieto: true, busyText: "Desfazendo…" })) toast("Pronto, o extra saiu da planilha.");
     };
+  });
+}
+
+// Pix: editar (ou anotar) um pagamento no Pix
+function pixSheet(p) {
+  openSheet(p ? "Pago no Pix" : "Paguei no Pix", `
+    <p class="tip">Pix sai do <b>dinheiro disponível</b> na hora.</p>
+    <label class="field"><span>O que pagou</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(p ? p.nome : "")}" placeholder="ex.: FEIRA"></label>
+    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 50,00" value="${esc(p ? moneyInput(p.valor) : "")}"></label>
+    <label class="field"><span>Dia que pagou</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(p && typeof p.data === "number" ? p.data : todaySerial()))}"></label>
+    <div class="stack"><button class="btn" id="f-ok">Salvar</button>${p ? `<button class="btn danger" id="f-del">Apagar este Pix</button>` : ""}</div>`, (el, close) => {
+    $("#f-ok", el).onclick = () => {
+      const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value), data = isoToSerial($("#f-data", el).value) ?? todaySerial();
+      if (!nome) return formErr(el, "#f-nome", "Escreva o que pagou.");
+      if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 50,00.");
+      const antes = p && { nome: p.nome, valor: p.valor, data: p.data };
+      salvarDaFolha(el, close, () => run(p ? "editPix" : "addPix", p ? { antes, nome, valor, data } : { nome, valor, data }));
+    };
+    if (p) $("#f-del", el).onclick = async () => {
+      close();
+      if (await confirmSheet("Apagar este Pix?", `<b>${esc(p.nome)}</b> – ${brl(p.valor)}<br>O valor volta para o dinheiro disponível.`, "Apagar", true)) run("delPix", { nome: p.nome, valor: p.valor, data: p.data });
+    };
+    if (!p) setTimeout(() => $("#f-nome", el).focus(), 300);
   });
 }
 
@@ -1631,6 +1691,8 @@ document.addEventListener("click", async e => {
     case "edit-porquinho": return porquinhoSheet(m.porquinho.find(p => p.row === row));
     case "novo-porquinho": return porquinhoSheet(null);
     case "novo-envio-carlos": return envioCarlosSheet(null);
+    case "edit-pix": { const p = m.pix[Number(t.dataset.i)]; return p ? pixSheet(p) : null; }
+    case "novo-pix": return pixSheet(null);
     case "edit-envio-carlos": return envioCarlosSheet(m.entradas.find(x => x.row === row));
     case "fechar": {
       const prox = m.cur ? monthByIdx(m.cur.idx + 1) : null;
