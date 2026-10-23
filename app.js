@@ -973,18 +973,26 @@ function viewContas() {
   const fixas = m.fixas.filter(f => f.nome || f.valor !== "");
   const pend = fixas.filter(f => f.nome && f.valor === "").length;
   // conta sem valor = ainda não lançada este mês (o fechamento deixa em branco); mostra o do mês passado como referência
-  const fix = fixas.sort((a, b) => (a.valor === "" ? 0 : 1) - (b.valor === "" ? 0 : 1) || num(a.dia) - num(b.dia)).map(f => {
+  // contas fixas e faturas dos cartões juntas, pela data de vencimento, cada uma com o botão Pagar
+  // (as compras de cada cartão continuam só na aba Cartões)
+  const linhas = fixas.map(f => ({ f, fat: false, venc: venceDia(m, f.dia) }))
+    .concat(m.faturas.filter(f => pagaCom(f.saide) && (num(f.valor) > 0 || f.pago)).map(f => ({ f, fat: true, venc: f.venc })));
+  const fix = linhas.sort((a, b) => (!a.fat && a.f.valor === "" ? 0 : 1) - (!b.fat && b.f.valor === "" ? 0 : 1) || (a.venc ?? 1e9) - (b.venc ?? 1e9)).map(({ f, fat, venc }) => {
+    if (fat) {
+      const dif = f.pago ? Math.round((num(f.valor) - num(f.pago.valor)) * 100) / 100 : 0;
+      return linhaConta({ f, fat: true, venc, dif: dif > 0 ? dif : 0 }, `cartão · vence ${esc(fmtDate(venc, "short"))} · ${saideChip(f.saide)}${dif > 0 ? ` · já pagou ${brl(f.pago.valor)}` : ""}`);
+    }
     const ant = m.prevFixas[norm(f.nome)];
     const falta = f.valor === "", cartao = f.saide === "NO CARTÃO";
     const sub = `dia ${esc(f.dia)} · ${saideChip(f.saide)}${f.onde ? ` · ${esc(f.onde)}` : ""}${falta && ant !== undefined ? `<br>mês passado: ${brl(ant)}` : ""}`;
-    return linhaConta({ f, fat: false, venc: venceDia(m, f.dia) }, sub).replace('class="linha', `class="linha ${falta ? "falta" : ""} ${cartao && !(f.pago && f.pago.lista) ? "dim" : ""}`);
+    return linhaConta({ f, fat: false, venc }, sub).replace('class="linha', `class="linha ${falta ? "falta" : ""} ${cartao && !(f.pago && f.pago.lista) ? "dim" : ""}`);
   }).join("");
   const neg = num(m.sobraFinal) < 0;
   return `${secHead("Dinheiro que entrou", `total ${brl(m.totalEntrou)}`, "#2f9e44")}
     <div class="list">${ent}</div>
     ${livreOutro ? `<button class="btn ghost" data-act="novo-envio-carlos"><svg><use href="#i-plus"/></svg>O Carlos mandou dinheiro</button>
     <button class="btn ghost" data-act="nova-entrada"><svg><use href="#i-plus"/></svg>Outro valor (ex.: saldo do Inter)</button>` : ""}
-    ${secHead("Contas fixas", pend ? `<b>${pend} para lançar</b> · total até agora ${brl(m.totalFixas)}` : `total ${brl(m.totalFixas)} · toque numa conta quando pagar`, "#f59f00")}
+    ${secHead("Contas e cartões do mês", `${pend ? `<b>${pend} para lançar</b> · ` : ""}contas fixas ${brl(m.totalFixas)} · cartões ${brl(m.faturas.filter(f => pagaCom(f.saide)).reduce((a, f) => a + num(f.valor), 0))} · toque em Pagar quando pagar`, "#f59f00")}
     <div class="list">${fix || `<div class="empty">Nenhuma conta.</div>`}</div>
     <button class="btn ghost" data-act="nova-fixa"><svg><use href="#i-plus"/></svg>Nova conta</button>
     ${secHead("Resultado do mês", "", "#2f9e44")}
