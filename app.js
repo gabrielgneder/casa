@@ -612,13 +612,22 @@ function viewInicio() {
       <div class="hero-lbl">${neg ? "Passou do que tinha este mês" : "Pode gastar este mês"}</div>
       <div class="hero-big">${brl(m.sobraFinal)}</div>
       <div class="hero-sub">Diminui a cada compra que lançar</div>
-      <dl class="conta">
-        <div><dt>Dinheiro que entrou</dt><dd>${brl(c.entrou)}</dd></div>
-        <div><dt>− Contas fixas</dt><dd>${brl(c.fixas)}</dd></div>
-        <div><dt>− Parcelas que continuam</dt><dd>${brl(c.parcelas)}</dd></div>
-        <div><dt>− Compras novas do mês</dt><dd>${brl(c.novas)}</dd></div>
-        <div class="tot"><dt>= ${neg ? "Falta" : "Pode gastar"}</dt><dd>${brl(m.sobraFinal)}</dd></div>
-      </dl>
+      <details class="conta-dt">
+        <summary>Ver a conta</summary>
+        <dl class="conta">
+          <div><dt>Dinheiro que entrou</dt><dd>${brl(c.entrou)}</dd></div>
+          <div><dt>− Contas fixas</dt><dd>${brl(c.fixas)}</dd></div>
+          <div><dt>− Parcelas que continuam</dt><dd>${brl(c.parcelas)}</dd></div>
+          <div class="sub"><dt>= Sobrou no começo</dt><dd>${brl(c.inicial)}</dd></div>
+          <div><dt>− Compras novas do mês</dt><dd>${brl(c.novas)}</dd></div>
+          <div class="tot"><dt>= ${neg ? "Falta" : "Pode gastar"}</dt><dd>${brl(m.sobraFinal)}</dd></div>
+        </dl>
+      </details>
+    </section>
+    <section class="inicial">
+      <span class="inicial-l">Sobrou no começo do mês</span>
+      <span class="inicial-v">${brl(c.inicial)}</span>
+      <span class="inicial-s">antes das compras novas</span>
     </section>
     ${m.alerta ? `<div class="alert"><svg><use href="#i-info"/></svg>${esc(m.alerta)}</div>` : ""}
     ${secHead("Faturas dos cartões", `${m.faturas.length} cartões · total ${brl(totFat)}`, "#5c7cfa")}
@@ -740,12 +749,15 @@ function contaMes(m) {
   const r = x => Math.round(x * 100) / 100, paga = x => x === "1º DINHEIRO" || x === "2º DINHEIRO";
   const fat = m.faturas.filter(f => paga(f.saide));
   const parcelas = r(fat.reduce((a, f) => a + num(f.previsto), 0));
-  return {
+  const c = {
     entrou: r(m.entradas.reduce((a, e) => a + num(e.valor), 0)),
     fixas: r(m.fixas.filter(f => paga(f.saide)).reduce((a, f) => a + num(f.valor), 0)),
     parcelas,
     novas: r(fat.reduce((a, f) => a + num(f.valor), 0) - parcelas),
   };
+  // amarelo = o que sobrou no começo do mês, sem as compras novas (o verde + o que já gastou)
+  c.inicial = r(num(m.sobraFinal) + c.novas);
+  return c;
 }
 const envioHtml = e => `<button class="item" data-act="edit-envio-carlos" data-row="${e.row}">
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>

@@ -168,7 +168,18 @@ main { max-width: 620px; margin: 0 auto; padding: 4px max(16px, env(safe-area-in
 .hero-big { font-size: clamp(2.1rem, 11.5vw, 2.7rem); overflow-wrap: anywhere; font-weight: 800; letter-spacing: -.02em; margin: 2px 0 2px; font-variant-numeric: tabular-nums; }
 .hero-sub { font-size: .82rem; }
 /* a conta do verde, linha a linha: entrou − fixas − parcelas − compras novas = pode gastar */
-.conta { margin: 16px 0 0; padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,.12); position: relative; z-index: 1; }
+.conta-dt { margin-top: 14px; position: relative; z-index: 1; }
+.conta-dt summary { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 22px; background: rgba(255,255,255,.18); font-weight: 700; cursor: pointer; list-style: none; }
+.conta-dt summary::-webkit-details-marker { display: none; }
+.conta-dt summary::after { content: "▾"; margin-left: 8px; }
+.conta-dt[open] summary::after { content: "▴"; }
+.conta .sub { border-top: 1px solid rgba(255,255,255,.25); margin-top: 2px; padding-top: 8px; }
+/* amarelo: o que sobrou no começo do mês (sem as compras novas); fundo fixo nos dois temas */
+.inicial { margin-top: 12px; padding: 16px 20px; border-radius: 22px; background: linear-gradient(135deg, #ffe066, #ffd43b); color: #3d2e00; box-shadow: var(--shadow-1); }
+.inicial-l { display: block; font-weight: 700; font-size: .95rem; }
+.inicial-v { display: block; font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.inicial-s { display: block; font-size: .84rem; font-weight: 700; color: #4d3a00; }
+.conta { margin: 10px 0 0; padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,.12); position: relative; z-index: 1; }
 .conta div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: .95rem; }
 .conta dt { font-weight: 600; }
 .conta dd { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
