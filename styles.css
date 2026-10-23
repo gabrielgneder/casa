@@ -181,6 +181,11 @@ main { max-width: 620px; margin: 0 auto; padding: 4px max(16px, env(safe-area-in
 .free-l { display: block; font-weight: 700; font-size: .92rem; }
 .free-v { display: block; font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .free-v.neg { color: #c92a2a; } /* fixo: o fundo é amarelo nos dois temas */
+/* barra do que ainda pode gastar no cartão: a parte escura é o que resta e vai diminuindo a cada compra */
+.free-main { flex: 1; min-width: 0; }
+.free-bar { display: block; height: 12px; margin: 8px 0 6px; border-radius: 6px; background: rgba(61, 46, 0, .16); overflow: hidden; }
+.free-bar i { display: block; height: 100%; border-radius: 6px; background: #3d2e00; transition: width .4s cubic-bezier(.22, 1, .36, 1); }
+.free-s { display: block; font-size: .84rem; font-weight: 700; color: #4d3a00; }
 
 .alert { display: flex; gap: 10px; align-items: center; margin-top: 12px; padding: 14px 16px; border-radius: 16px; background: var(--alert-bg); color: var(--alert-ink); font-weight: 700; }
 

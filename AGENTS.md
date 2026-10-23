@@ -23,7 +23,9 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
   - **Extra do Carlos** (compra que ele paga, fora dos cartões): no botão Compra → "Extra do Carlos". Vai para o bloco "O QUE O CARLOS DÁ" com `EXTRA` na coluna B e sai no fechamento. Itens sem `EXTRA` (Netflix, INSS…) são fixos e ficam.
   - **Dinheiro que o Carlos mandou no meio do mês:** linha `CARLOS` nas "outras entradas" (B = data, C = valor). Soma na Sobra final e abate (ajuste da planilha em `PLANILHA-AJUSTE-CARLOS.md`, já feito) da diferença do Carlos. Sai no fechamento.
   - **2º dinheiro é variável:** o app sugere quanto pedir ao Carlos = 2º dinheiro atual − Sobra final (o que zera a sobra).
-- Planilha ajustada em 22/10/2026 (6 linhas em ENTRADAS, fórmulas da Sobra final e do "Entrou do Carlos"); backup oculto "CASA backup 22-10-2026". Fórmulas na planilha são no formato Brasil (separador `;`).
+- Planilha ajustada em 22/10/2026 (6 linhas em ENTRADAS, fórmulas da Sobra final e do "Entrou do Carlos"); backup oculto "CASA backup 22-10-2026". Fórmulas na planilha são no formato Brasil (separador `;`). O "Previsto livre p/ cartão" (C57) também soma os envios do Carlos.
+- **Barra "Ainda pode gastar no cartão" (Início):** total = Previsto livre p/ cartão; já gastou = Σ por cartão (Fatura − Já previsto), ou seja, compras novas que entram na fatura deste mês; resta = total − já gastou.
+- **1º dinheiro = 5.000** (parte fixa). Se ele mandar mais junto, a diferença vai como "O Carlos mandou dinheiro" (ex.: 31/10/2026, 5.500 = 5.000 + 500).
 
 ## Arquivos
 

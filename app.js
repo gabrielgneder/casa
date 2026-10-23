@@ -616,10 +616,7 @@ function viewInicio() {
         <div><span>Entrou no mês</span><b>${brl(m.totalEntrou)}</b></div>
       </div>
     </section>
-    <button class="free" data-act="tab" data-tab="contas">
-      <span class="free-ic"><svg><use href="#i-card"/></svg></span>
-      <span><span class="free-l">Livre para gastar no cartão</span><span class="free-v ${num(m.previsto) < 0 ? "neg" : ""}">${brl(m.previsto)}</span></span>
-    </button>
+    ${freeHtml(gastoCartao(m))}
     ${m.alerta ? `<div class="alert"><svg><use href="#i-info"/></svg>${esc(m.alerta)}</div>` : ""}
     ${secHead("Faturas dos cartões", `${m.faturas.length} cartões · total ${brl(totFat)}`, "#5c7cfa")}
     <div class="list">${fat || `<div class="empty">Nenhuma fatura.</div>`}</div>
@@ -734,6 +731,28 @@ function pedir2o() {
 }
 const pedidoHtml = p => `Para pagar os cartões e as contas do 2º dinheiro sem faltar, peça ao Carlos <b>${brl(p.valor)}</b>.`
   + (p.faltam ? ` <br>Ainda faltam lançar <b>${p.faltam} conta${p.faltam > 1 ? "s" : ""} fixa${p.faltam > 1 ? "s" : ""}</b>: esse valor vai subir quando lançar.` : "");
+// Quanto ainda pode gastar no cartão neste mês.
+// limite = "Previsto livre p/ cartão" da planilha (entrou − contas fixas − parcelas que já vinham de antes);
+// usado = compras novas que entram na fatura deste mês (fatura − "Já previsto" de cada cartão).
+function gastoCartao(m) {
+  const limite = num(m.previsto);
+  const usado = Math.round(m.faturas.reduce((t, f) => t + Math.max(0, num(f.valor) - num(f.previsto)), 0) * 100) / 100;
+  return { limite, usado, resta: Math.round((limite - usado) * 100) / 100 };
+}
+function freeHtml({ limite, usado, resta }) {
+  const pct = limite > 0 ? Math.max(0, Math.min(100, resta / limite * 100)) : 0;
+  const [rotulo, valor, sub] = limite <= 0
+    ? ["Livre para gastar no cartão", brl(limite), "O dinheiro do mês já está todo comprometido."]
+    : resta < 0
+      ? ["Passou do previsto no cartão", brl(-resta), `Gastou ${brl(usado)} em compras novas; o previsto era ${brl(limite)}.`]
+      : ["Ainda pode gastar no cartão", brl(resta), `Já gastou ${brl(usado)} de ${brl(limite)} neste mês`];
+  return `<button class="free" data-act="tab" data-tab="cartoes">
+      <span class="free-ic"><svg><use href="#i-card"/></svg></span>
+      <span class="free-main"><span class="free-l">${rotulo}</span><span class="free-v ${resta < 0 || limite <= 0 ? "neg" : ""}">${valor}</span>
+        ${limite > 0 ? `<span class="free-bar" aria-hidden="true"><i style="width:${pct.toFixed(1)}%"></i></span>` : ""}
+        <span class="free-s">${sub}</span></span>
+    </button>`;
+}
 const envioHtml = e => `<button class="item" data-act="edit-envio-carlos" data-row="${e.row}">
       <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
       <span class="item-main"><span class="item-t">O Carlos mandou</span><span class="item-s">${typeof e.data === "number" ? `dia ${esc(fmtDate(e.data, "short"))} · ` : ""}pagamento da pensão</span></span>
