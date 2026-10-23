@@ -141,9 +141,13 @@ async function fetchEmail() {
 const RANGES = ["CASA!A1:H900", "CASA!X1:Y900", "Tabelas!A2:D300"];
 async function readGrid() {
   const q = RANGES.map(r => "ranges=" + encodeURIComponent(r)).join("&");
-  const j = await api(`/values:batchGet?${q}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
+  // o último mês fechado fica no topo de ANTERIORES: dá o "mês passado" das contas fixas (se falhar, segue sem)
+  const [j, prev] = await Promise.all([
+    api(`/values:batchGet?${q}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`),
+    readRange("ANTERIORES!A1:C220").catch(() => []),
+  ]);
   const [main, helper, tab] = j.valueRanges.map(v => v.values || []);
-  return { main, helper, tab };
+  return { main, helper, tab, prev };
 }
 
 // Acha cada bloco da aba CASA pelos títulos da coluna A (assim o app continua
@@ -171,7 +175,8 @@ function parse(g) {
   const rEnt = need(find(titulo("ENTRADAS")), "ENTRADAS");
   const rTotEnt = need(find(comeca("TOTAL QUE ENTROU"), rEnt), "TOTAL QUE ENTROU");
   m.entradas = [];
-  for (let r = rEnt + 1; r < rTotEnt; r++) m.entradas.push({ row: r, nome: A(r), data: v(r, 2), valor: v(r, 3), principal: r - rEnt <= 2 });
+  // "CARLOS" = dinheiro que o Carlos mandou no meio do mês (data na coluna B); sai no fechamento
+  for (let r = rEnt + 1; r < rTotEnt; r++) m.entradas.push({ row: r, nome: A(r), data: v(r, 2), valor: v(r, 3), principal: r - rEnt <= 2, carlos: r - rEnt > 2 && norm(A(r)) === "CARLOS" });
   m.totalEntrou = v(rTotEnt, 3);
 
   // faturas do mês
@@ -187,6 +192,11 @@ function parse(g) {
   for (let r = rFix + 1; r < rTotFix; r++)
     m.fixas.push({ row: r, nome: A(r), dia: v(r, 2), valor: v(r, 3), saide: saideOf(v(r, 5)), onde: String(v(r, 6)) });
   m.totalFixas = v(rTotFix, 3);
+  // valor de cada conta fixa no último mês fechado (topo de ANTERIORES), pela grafia normalizada do nome
+  m.prevFixas = {};
+  const P = g.prev || [], pA = i => norm((P[i] || [])[0]);
+  const pi = P.findIndex((_, i) => pA(i) === "CONTAS FIXAS");
+  if (pi >= 0) for (let i = pi + 1; i < P.length && pA(i) !== "TOTAL CONTAS FIXAS"; i++) { const val = (P[i] || [])[2]; if (pA(i) && typeof val === "number") m.prevFixas[pA(i)] = val; }
 
   // resultado
   const rRes = need(find(titulo("RESULTADO DO MÊS")), "RESULTADO DO MÊS");
@@ -197,7 +207,8 @@ function parse(g) {
   const rCH = need(find(titulo("O QUE O CARLOS DÁ")), "bloco do Carlos");
   const rNu = need(find(comeca("NUBANK CARLOS"), rCH), "NUBANK CARLOS");
   m.carlos = { mensalRow: rCH + 1, mensal: v(rCH + 1, 3), extras: [], nubank: v(rNu, 3), total: v(rNu + 1, 3), entrou: v(rNu + 2, 3), dif: v(rNu + 3, 3) };
-  for (let r = rCH + 2; r < rNu; r++) m.carlos.extras.push({ row: r, nome: A(r), valor: v(r, 3) });
+  // coluna B = "EXTRA": compra extra do mês (lançada pelo app), sai no fechamento; os outros itens são fixos
+  for (let r = rCH + 2; r < rNu; r++) m.carlos.extras.push({ row: r, nome: A(r), valor: v(r, 3), extra: norm(v(r, 2)) === "EXTRA" });
 
   // cartões
   const rCT = need(find(titulo("CARTÕES")), "CARTÕES");
@@ -335,8 +346,34 @@ const OPS = {
   },
   async delCarlos({ row, antes }) {
     await sameRow(row, antes);
-    await clearRanges([`CASA!A${row}`, `CASA!C${row}`]);
+    await clearRanges([`CASA!A${row}:C${row}`]); // B pode ter a marca EXTRA
     return "Item apagado.";
+  },
+  // compra extra que o Carlos paga (não é cartão): bloco do Carlos com B = "EXTRA"
+  async addExtraCarlos({ nome, valor }) {
+    const f = S.m.carlos.extras.find(x => !x.nome && x.valor === "");
+    if (!f) throw new Error("Não tem linha vazia no bloco do Carlos. Apague um item que não usa mais.");
+    await sameRow(f.row, "");
+    await writeRaw([{ range: `CASA!A${f.row}:C${f.row}`, values: [[nome, "EXTRA", valor]] }]);
+    OPS.ultimaLinha = f.row;
+    return "Extra do Carlos anotado.";
+  },
+  // dinheiro que o Carlos mandou no meio do mês: ENTRADAS, linha "CARLOS" com a data em B
+  async saveEnvioCarlos({ row, data, valor }) {
+    if (!row) {
+      const f = S.m.entradas.find(x => !x.principal && !x.nome && x.valor === "");
+      if (!f) throw new Error("Não tem linha livre em ENTRADAS para o dinheiro do Carlos. Peça ao Gabriel para inserir linhas na planilha.");
+      row = f.row;
+      await sameRow(row, "");
+    } else await sameRow(row, "CARLOS");
+    await writeRaw([{ range: `CASA!A${row}:C${row}`, values: [["CARLOS", data, valor]] }]);
+    OPS.ultimaLinha = row;
+    return "Dinheiro do Carlos anotado.";
+  },
+  async delEnvioCarlos({ row }) {
+    await sameRow(row, "CARLOS");
+    await clearRanges([`CASA!A${row}:C${row}`]);
+    return "Apagado.";
   },
   async saveCartao({ row, dia, melhor, ajuste }) {
     await writeRaw([{ range: `CASA!C${row}:D${row}`, values: [[dia, melhor]] }, { range: `CASA!H${row}`, values: [[ajuste === null ? "" : ajuste]] }]);
@@ -439,6 +476,11 @@ async function fecharMes() {
   // 3) passa para o mês seguinte e limpa os vencimentos mudados à mão
   data.push({ range: "CASA!B2", values: [[prox.label]] });
   for (const c of m.cartoes) data.push({ range: `CASA!H${c.row}`, values: [[""]] });
+  // 4) contas fixas: só o valor fica em branco (ela lança o valor certo do mês; o do mês passado fica em ANTERIORES)
+  for (const f of m.fixas) if (f.nome) data.push({ range: `CASA!C${f.row}`, values: [[""]] });
+  // 5) extras do Carlos e dinheiro que ele mandou no meio do mês: eram deste mês, saem
+  for (const x of m.carlos.extras) if (x.extra) data.push({ range: `CASA!A${x.row}:C${x.row}`, values: [["", "", ""]] });
+  for (const e of m.entradas) if (e.carlos) data.push({ range: `CASA!A${e.row}:C${e.row}`, values: [["", "", ""]] });
   await writeRaw(data);
   return `${titleCase(m.cur.nome)} foi guardado em ANTERIORES. Agora é ${titleCase(prox.nome)}.`;
 }
@@ -583,7 +625,7 @@ function viewInicio() {
     <div class="list">${fat || `<div class="empty">Nenhuma fatura.</div>`}</div>
     ${secHead("Contas do mês", "", "#f59f00")}
     <div class="list">
-      <button class="item" data-act="tab" data-tab="contas">${icoBubble("CASA")}<span class="item-main"><span class="item-t">Contas fixas</span><span class="item-s">${m.fixas.filter(f => f.nome).length} contas · luz, gás, condomínio…</span></span><span class="item-v">${brl(m.totalFixas)}</span></button>
+      <button class="item" data-act="tab" data-tab="contas">${icoBubble("CASA")}<span class="item-main"><span class="item-t">Contas fixas</span><span class="item-s">${(() => { const n = m.fixas.filter(f => f.nome).length, p = m.fixas.filter(f => f.nome && f.valor === "").length; return p ? `<b>${p} de ${n} para lançar</b>` : `${n} contas · luz, gás, condomínio…`; })()}</span></span><span class="item-v">${brl(m.totalFixas)}</span></button>
     </div>`;
 }
 
@@ -683,9 +725,14 @@ function viewCartao() {
     <button class="btn ghost" data-act="edit-cartao" data-card="${esc(c.nome)}">Mudar melhor dia ou vencimento</button>`;
 }
 
+const envioHtml = e => `<button class="item" data-act="edit-envio-carlos" data-row="${e.row}">
+      <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span>
+      <span class="item-main"><span class="item-t">O Carlos mandou</span><span class="item-s">${typeof e.data === "number" ? `dia ${esc(fmtDate(e.data, "short"))} · ` : ""}pagamento da pensão</span></span>
+      <span class="item-v pos">${brl(e.valor)}</span></button>`;
 function viewContas() {
   const m = S.m;
   const ent = m.entradas.filter(e => e.principal || e.nome || e.valor !== "").map(e => {
+    if (e.carlos) return envioHtml(e);
     const primeiro = e.row - m.ranges.rEnt === 1;
     const nome = e.principal ? (primeiro ? "1º dinheiro" : "2º dinheiro") : e.nome;
     const sub = e.principal ? `${primeiro ? "chega no fim do mês" : "para os cartões"} · dia ${esc(fmtDate(e.data, "short"))}` : "entra junto com o 2º";
@@ -695,15 +742,23 @@ function viewContas() {
       <span class="item-v pos">${brl(e.valor)}</span></button>`;
   }).join("");
   const livreOutro = m.entradas.some(e => !e.principal && !e.nome && e.valor === "");
-  const fix = m.fixas.filter(f => f.nome || f.valor !== "").sort((a, b) => num(a.dia) - num(b.dia)).map(f => `<button class="item ${f.saide === "NO CARTÃO" ? "dim" : ""}" data-act="edit-fixa" data-row="${f.row}">
+  const fixas = m.fixas.filter(f => f.nome || f.valor !== "");
+  const pend = fixas.filter(f => f.nome && f.valor === "").length;
+  // conta sem valor = ainda não lançada este mês (o fechamento deixa em branco); mostra o do mês passado como referência
+  const fix = fixas.sort((a, b) => (a.valor === "" ? 0 : 1) - (b.valor === "" ? 0 : 1) || num(a.dia) - num(b.dia)).map(f => {
+    const ant = m.prevFixas[norm(f.nome)];
+    const falta = f.valor === "";
+    return `<button class="item ${f.saide === "NO CARTÃO" ? "dim" : ""} ${falta ? "falta" : ""}" data-act="edit-fixa" data-row="${f.row}">
       ${icoBubble(f.nome)}
-      <span class="item-main"><span class="item-t">${esc(f.nome)}</span><span class="item-s">dia ${esc(f.dia)} · ${saideChip(f.saide)}${f.onde ? ` · ${esc(f.onde)}` : ""}</span></span>
-      <span class="item-v">${brl(f.valor)}</span></button>`).join("");
+      <span class="item-main"><span class="item-t">${esc(f.nome)}</span><span class="item-s">dia ${esc(f.dia)} · ${saideChip(f.saide)}${f.onde ? ` · ${esc(f.onde)}` : ""}${falta && ant !== undefined ? `<br>mês passado: ${brl(ant)}` : ""}</span></span>
+      <span class="item-v">${falta ? `<span class="lancar">Lançar</span>` : brl(f.valor)}</span></button>`;
+  }).join("");
   const neg = num(m.sobraFinal) < 0;
   return `${secHead("Dinheiro que entrou", `total ${brl(m.totalEntrou)}`, "#2f9e44")}
     <div class="list">${ent}</div>
-    ${livreOutro ? `<button class="btn ghost" data-act="nova-entrada"><svg><use href="#i-plus"/></svg>Outro valor (ex.: saldo do Inter)</button>` : ""}
-    ${secHead("Contas fixas", `total ${brl(m.totalFixas)} · sem as que vêm no cartão`, "#f59f00")}
+    ${livreOutro ? `<button class="btn ghost" data-act="novo-envio-carlos"><svg><use href="#i-plus"/></svg>O Carlos mandou dinheiro</button>
+    <button class="btn ghost" data-act="nova-entrada"><svg><use href="#i-plus"/></svg>Outro valor (ex.: saldo do Inter)</button>` : ""}
+    ${secHead("Contas fixas", pend ? `<b>${pend} para lançar</b> · total até agora ${brl(m.totalFixas)}` : `total ${brl(m.totalFixas)} · sem as que vêm no cartão`, "#f59f00")}
     <div class="list">${fix || `<div class="empty">Nenhuma conta.</div>`}</div>
     <button class="btn ghost" data-act="nova-fixa"><svg><use href="#i-plus"/></svg>Nova conta</button>
     ${secHead("Resultado do mês", "", "#2f9e44")}
@@ -717,7 +772,8 @@ function viewContas() {
 function viewMais() {
   const m = S.m, c = m.carlos;
   const ex = c.extras.filter(x => x.nome || x.valor !== "").map(x => `<button class="item" data-act="edit-carlos" data-row="${x.row}">
-      ${icoBubble(x.nome)}<span class="item-main"><span class="item-t">${esc(x.nome)}</span></span><span class="item-v">${brl(x.valor)}</span></button>`).join("");
+      ${icoBubble(x.nome)}<span class="item-main"><span class="item-t">${esc(x.nome)}</span>${x.extra ? `<span class="item-s"><span class="tag tag-extra">EXTRA DO MÊS</span></span>` : ""}</span><span class="item-v">${brl(x.valor)}</span></button>`).join("");
+  const envios = m.entradas.filter(e => e.carlos).map(envioHtml).join("");
   const pqRows = m.porquinho.filter(p => p.data !== "" || p.inter !== "" || p.mp !== "");
   const ult = pqRows[pqRows.length - 1];
   const pq = [...pqRows].reverse().map(p => `<button class="item" data-act="edit-porquinho" data-row="${p.row}">
@@ -734,7 +790,9 @@ function viewMais() {
       ${ex}
       <div class="item">${miniCard("NUBANK")}<span class="item-main"><span class="item-t">Nubank do Carlos</span><span class="item-s">vem sozinho da lista do Nubank</span></span><span class="item-v">${brl(c.nubank)}</span></div>
     </div>
-    <button class="btn ghost" data-act="novo-carlos"><svg><use href="#i-plus"/></svg>Novo valor do Carlos</button>
+    <button class="btn ghost" data-act="novo-carlos"><svg><use href="#i-plus"/></svg>Novo item fixo do Carlos</button>
+    ${envios ? `<p class="sub-lista">Dinheiro que o Carlos mandou neste mês</p><div class="list">${envios}</div>` : ""}
+    <button class="btn ghost" data-act="novo-envio-carlos"><svg><use href="#i-plus"/></svg>O Carlos mandou dinheiro</button>
 
     ${secHead("Porquinho", ult ? `último saldo: ${brl(ult.total)}` : "quanto tem investido", "#e64980")}
     <div class="list">${pq || `<div class="empty">Nada anotado.</div>`}</div>
@@ -885,21 +943,28 @@ function compraSheet({ cardNome, item }) {
   const autoFat = () => { const c = cardOf(); const x = c ? faturaPara(c, dataSerial) : null; return x ? x.label : ""; };
   if (!item && lista) fat = autoFat();
 
-  const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" aria-pressed="${!!(lista && lista.nome === l.nome)}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("");
+  let extra = false; // compra que o Carlos paga, fora dos cartões
+  const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" aria-pressed="${!!(lista && lista.nome === l.nome)}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("")
+    + (item ? "" : `<button type="button" class="pick-extra" data-lista="__extra" aria-pressed="false">Extra do Carlos<small>não é cartão</small></button>`);
   const body = `
     <div class="field"><span id="g-cartao">Cartão</span><div class="cardpick" role="group" aria-labelledby="g-cartao">${pick}</div></div>
+    <p class="tip" id="f-extra-tip" hidden>O Carlos paga esta compra para você: soma no <b>Total do Carlos</b> deste mês e sai quando fechar o mês.</p>
     <label class="field"><span>O que comprou</span><input class="input" id="f-nome" autocomplete="off" autocapitalize="characters" value="${esc(item ? item.nome : "")}" placeholder="ex.: MERCADO"></label>
+    <div class="so-cartao">
     <div class="field"><span id="g-tipo">Como pagou</span><div class="choices" role="group" aria-labelledby="g-tipo">${choiceBtns("tipo", [["vista", "À vista"], ["parc", "Parcelado"], ["fixo", "Todo mês"]], tipo)}</div></div>
     <div class="field" id="parc-box"><span>Quantas parcelas</span>
       <div class="stepper"><button type="button" data-step="-1">−</button><div class="num" id="f-n">${nParc}</div><button type="button" data-step="1">+</button></div></div>
+    </div>
     <label class="field"><span id="lbl-valor">Valor</span><input class="input money" id="f-valor" inputmode="decimal" autocomplete="off" placeholder="ex.: 49,90" value="${esc(item ? moneyInput(item.valor) : "")}">
       <small id="f-total"></small></label>
+    <div class="so-cartao">
     <label class="field"><span>Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
     <div class="field"><span id="g-fat">Entra na fatura de</span>
       <div class="tip" id="f-best"></div>
       <div class="choices" id="f-fat-opts" role="group" aria-labelledby="g-fat"></div>
       <button type="button" class="linkbtn" id="f-fat-mudar">Escolher outro mês</button>
       <select class="input" id="f-fat-sel" hidden>${monthOptions(fat)}</select></div>
+    </div>
     <div class="stack"><button class="btn" id="f-ok">${item ? "Salvar alteração" : "Salvar compra"}</button>
       ${item ? `<button class="btn danger" id="f-del">Apagar esta compra</button>` : ""}</div>`;
 
@@ -907,9 +972,10 @@ function compraSheet({ cardNome, item }) {
     const upd = () => {
       $("#parc-box", el).hidden = tipo !== "parc";
       $("#f-n", el).textContent = nParc;
-      $("#lbl-valor", el).textContent = tipo === "parc" ? "Valor de CADA parcela" : tipo === "fixo" ? "Valor por mês" : "Valor";
+      $("#lbl-valor", el).textContent = extra ? "Valor" : tipo === "parc" ? "Valor de CADA parcela" : tipo === "fixo" ? "Valor por mês" : "Valor";
+      $$(".so-cartao", el).forEach(x => x.hidden = extra); $("#f-extra-tip", el).hidden = !extra;
       const v = parseMoney($("#f-valor", el).value);
-      $("#f-total", el).textContent = tipo === "parc" && v ? `Total da compra: ${brl(v * nParc)} (${nParc}× ${brl(v)})` : "";
+      $("#f-total", el).textContent = !extra && tipo === "parc" && v ? `Total da compra: ${brl(v * nParc)} (${nParc}× ${brl(v)})` : "";
       const c = cardOf(), auto = monthByLabel(autoFat());
       $("#f-best", el).innerHTML = c && auto
         ? `<b>Melhor dia de compra do ${esc(titleCase(c.nome))}: dia ${c.melhor}.</b> Comprando em ${esc(fmtDate(dataSerial, "short"))}, a compra cai na fatura de <b>${esc(titleCase(auto.nome).split(" ")[0].toLowerCase())}</b>. Se o banco colocou em outra, é só tocar no mês certo.`
@@ -922,7 +988,8 @@ function compraSheet({ cardNome, item }) {
       $("#f-fat-sel", el).value = fat;
     };
     $$("[data-lista]", el).forEach(b => b.onclick = () => {
-      lista = m.listas.find(l => l.nome === b.dataset.lista);
+      extra = b.dataset.lista === "__extra";
+      lista = extra ? null : m.listas.find(l => l.nome === b.dataset.lista);
       marca($$("[data-lista]", el), b);
       if (!fatManual) fat = autoFat();
       upd();
@@ -937,9 +1004,13 @@ function compraSheet({ cardNome, item }) {
     $("#f-ok", el).onclick = async () => {
       const nome = $("#f-nome", el).value.trim().toUpperCase();
       const valor = parseMoney($("#f-valor", el).value);
-      if (!lista) return formErr(el, ".cardpick button", "Escolha o cartão.");
+      if (!lista && !extra) return formErr(el, ".cardpick button", "Escolha o cartão (ou “Extra do Carlos”, se não foi no cartão).");
       if (!nome) return formErr(el, "#f-nome", "Escreva o que comprou.");
       if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 49,90.");
+      if (extra) {
+        if (await salvarDaFolha(el, close, () => run("addExtraCarlos", { nome, valor }, { quieto: true }))) reciboExtra({ nome, valor, row: OPS.ultimaLinha });
+        return;
+      }
       if (!fat) return formErr(el, "#f-fat-opts button, #f-fat-sel", "Escolha em qual fatura entra.");
       const parc = tipo === "fixo" ? "FIXO" : tipo === "parc" ? nParc : "";
       const args = { lista: lista.nome, nome, valor, data: dataSerial, parc, fat };
@@ -1008,17 +1079,61 @@ function reciboCompra({ args, row, antes, trocou }) {
   });
 }
 
+// Recibo do extra do Carlos: mesmo jeito do recibo de compra, apontando para o Total do Carlos.
+function reciboExtra({ nome, valor, row }) {
+  const total = S.m.carlos.total;
+  openSheet("Extra anotado", `
+    <div class="recibo">
+      <svg class="recibo-ok" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37.5 19"/></svg>
+      <p class="recibo-lead">${DEMO ? "Anotado (modo de teste)." : "Está na planilha."}</p>
+      <div class="recibo-linha">
+        <span class="ico" style="--ic:#2f9e44"><svg><use href="#i-user"/></svg></span>
+        <div class="recibo-main"><b>${esc(nome)}</b><span>o Carlos paga · Total do Carlos agora ${brl(total)}</span></div>
+        <div class="recibo-v">${brl(valor)}</div>
+      </div>
+    </div>
+    <div class="stack"><button class="btn big" data-pronto>Pronto</button>
+      <button class="btn ghost" data-ver>Ver o Carlos</button>
+      <button type="button" class="linkbtn recibo-desfazer" data-desfazer>Desfazer: apagar este extra</button></div>`, (el, close) => {
+    $("[data-pronto]", el).onclick = close;
+    $("[data-ver]", el).onclick = () => { close(); S.tab = "mais"; render(); scrollTo({ top: 0 }); };
+    $("[data-desfazer]", el).onclick = async () => {
+      close();
+      if (await run("delCarlos", { row, antes: nome }, { quieto: true, busyText: "Desfazendo…" })) toast("Pronto, o extra saiu da planilha.");
+    };
+  });
+}
+
+// Dinheiro que o Carlos mandou no meio do mês (pagamento da pensão, além do 1º e do 2º dinheiro)
+function envioCarlosSheet(e) {
+  openSheet(e ? "Dinheiro do Carlos" : "O Carlos mandou dinheiro", `
+    <p class="tip">Conta como pagamento da pensão: entra no que sobra do mês e abate do que o Carlos ainda deve. Sai quando fechar o mês.</p>
+    <label class="field"><span>Quanto ele mandou</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 300,00" value="${esc(e ? moneyInput(e.valor) : "")}"></label>
+    <label class="field"><span>Quando</span><input class="input" type="date" id="f-data" value="${esc(e && typeof e.data === "number" ? serialToIso(e.data) : serialToIso(todaySerial()))}"></label>
+    <div class="stack"><button class="btn" id="f-ok">Salvar</button>${e ? `<button class="btn danger" id="f-del">Apagar</button>` : ""}</div>`, (el, close) => {
+    $("#f-ok", el).onclick = () => {
+      const valor = parseMoney($("#f-valor", el).value);
+      if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite quanto ele mandou, por exemplo 300,00.");
+      salvarDaFolha(el, close, () => run("saveEnvioCarlos", { row: e ? e.row : null, data: isoToSerial($("#f-data", el).value) ?? "", valor }));
+    };
+    if (e) $("#f-del", el).onclick = async () => { close(); if (await confirmSheet("Apagar?", `O dinheiro de ${brl(e.valor)} que o Carlos mandou sai da planilha.`, "Apagar", true)) run("delEnvioCarlos", { row: e.row }); };
+    if (!e) setTimeout(() => $("#f-valor", el).focus(), 300);
+  });
+}
+
 function fixaSheet(f) {
   let saide = f ? f.saide : "1º DINHEIRO";
   openSheet(f ? "Conta fixa" : "Nova conta", `
     <label class="field"><span>Nome da conta</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(f ? f.nome : "")}" placeholder="ex.: LUZ"></label>
-    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(f ? moneyInput(f.valor) : "")}"></label>
+    <label class="field"><span>Valor ${f && f.valor === "" ? "deste mês" : ""}</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(f ? moneyInput(f.valor) : "")}">
+      ${f && S.m.prevFixas[norm(f.nome)] !== undefined ? `<small>Mês passado: ${brl(S.m.prevFixas[norm(f.nome)])}</small>` : ""}</label>
     <label class="field"><span>Dia de vencimento</span><input class="input" id="f-dia" inputmode="numeric" value="${esc(f ? f.dia : "")}" placeholder="ex.: 10"></label>
     <div class="field"><span id="g-saide">Paga com</span><div class="choices" role="group" aria-labelledby="g-saide">${choiceBtns("saide", [["1º DINHEIRO", "1º dinheiro"], ["2º DINHEIRO", "2º dinheiro"], ["NO CARTÃO", "No cartão"]], saide)}</div>
       <small>“No cartão” = já vem na fatura de um cartão, não soma de novo.</small></div>
     <label class="field"><span>Onde pagar</span><input class="input" id="f-onde" value="${esc(f ? f.onde : "")}" placeholder="ex.: Aplicativo, PIX, boleto"></label>
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${f ? `<button class="btn danger" id="f-del">Apagar esta conta</button>` : ""}</div>`, (el, close) => {
     bindChoices(el, "saide", v => saide = v);
+    if (f && f.valor === "") setTimeout(() => $("#f-valor", el).focus(), 300);
     $("#f-ok", el).onclick = () => {
       const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value);
       const dia = parseInt($("#f-dia", el).value, 10);
@@ -1122,9 +1237,11 @@ document.addEventListener("click", async e => {
     case "novo-carlos": return valorSheet("Novo valor do Carlos", { nome: "", valor: "", nomeEditavel: true, onSave: (n, v) => run("saveCarlos", { row: null, nome: n, valor: v }) });
     case "edit-porquinho": return porquinhoSheet(m.porquinho.find(p => p.row === row));
     case "novo-porquinho": return porquinhoSheet(null);
+    case "novo-envio-carlos": return envioCarlosSheet(null);
+    case "edit-envio-carlos": return envioCarlosSheet(m.entradas.find(x => x.row === row));
     case "fechar": {
       const prox = m.cur ? monthByIdx(m.cur.idx + 1) : null;
-      if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES, as compras que já acabaram saem das listas e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
+      if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>As compras que já acabaram saem das listas, os <b>valores das contas fixas</b> ficam em branco para lançar de novo, e os <b>extras do Carlos</b> e o dinheiro que ele mandou no mês saem.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
         run("fecharMes", {}, { busyText: "Fechando o mês…" });
       return;
     }
@@ -1188,6 +1305,7 @@ const Demo = {
     }
     if (path.startsWith("/values/")) {
       const range = decodeURIComponent(path.slice(8).split("?")[0]);
+      if (!range.startsWith("CASA!")) return { values: this.g.prev || [] };
       const mm = /!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?/.exec(range);
       const c0 = mm[1].charCodeAt(0) - 65, c1 = (mm[3] || mm[1]).charCodeAt(0) - 65, r0 = Number(mm[2]), r1 = Number(mm[4] || mm[2]);
       const values = []; for (let r = r0; r <= r1; r++) values.push((this.g.main[r - 1] || []).slice(c0, c1 + 1));

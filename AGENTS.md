@@ -7,7 +7,7 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 1. **Sem build e sem dependências.** Os arquivos são servidos como estão.
 2. **A versão é carimbada pela Action** (`.github/workflows/deploy.yml`): a cada push na `main`, `VERSION` em `sw.js` e `APP_VERSION` em `app.js` viram o hash do commit. Não precisa mudar à mão, mas não renomeie essas duas constantes (a Action falha se não achar). O `index.html` e o `SHELL` do `sw.js` pedem `styles.css?v=dev`, `app.js?v=dev` e `config.js?v=dev`; a Action troca `dev` pelo hash, para um HTML novo nunca rodar com JS/CSS velho do cache. Não escreva `?v=dev` em nenhum outro lugar desses arquivos (a Action conta 3 em cada). Arquivo novo do app precisa entrar em `SHELL` no `sw.js` **e** no passo "Montar a pasta publicada" da Action.
 3. **`config.js` é o único arquivo de configuração** (`GOOGLE_CLIENT_ID`, `SPREADSHEET_ID`).
-4. **O app nunca grava em célula com fórmula.** Só nas colunas de digitar: listas de compras (A:E), contas fixas (A:C e E:F — a coluna D é fórmula), entradas (A, C), Carlos (A, C), cartões (C, D, H), porquinho (A:C, F), mês (B2). Sempre `valueInputOption: RAW`; datas vão como número de série (dias desde 30/12/1899).
+4. **O app nunca grava em célula com fórmula.** Só nas colunas de digitar: listas de compras (A:E), contas fixas (A:C e E:F — a coluna D é fórmula), entradas (A, C; e B nas linhas de "outros valores", que não têm fórmula), Carlos (A:C — B guarda a marca `EXTRA`), cartões (C, D, H), porquinho (A:C, F), mês (B2). Sempre `valueInputOption: RAW`; datas vão como número de série (dias desde 30/12/1899).
 5. **Os blocos são achados pelos títulos da coluna A** (`parse()` em `app.js`), comparados com `norm()` (sem acento, espaços extras ou diferença de maiúscula). Se mudar as palavras de um título na planilha, mudar também no `parse()`. `node testes/parser.js` testa o `parse()` com títulos bagunçados (roda na Action); ele extrai do `app.js` as linhas `const num`, `const norm`, `const titleCase` e `function parse` — mantenha cada uma dessas constantes numa linha só.
 6. **Antes de editar ou apagar uma linha, conferir que ela ainda é a mesma** (`sameRow`) — duas pessoas usam a mesma planilha.
 7. **Escopo do Google: `openid email https://www.googleapis.com/auth/spreadsheets`.** O `drive.file` não serve: a planilha não foi criada pelo app.
@@ -15,6 +15,13 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 9. **Nada de dados reais no repositório.** `demo-grid.json` (cópia da planilha para testar) fica fora do git. `demo-ficticio.json` é inventado (gerado de uma cópia da planilha com valores falsos, recalculada no Excel) e é publicado para o modo de teste.
 10. **O modo de teste (`?demo`) guarda tudo em `casa-demo.*`**, separado do app de verdade (mesmo endereço, mesmo `localStorage`). Não use `localStorage` direto: use `store`.
 11. **Formulário nunca fecha antes de gravar.** Use `salvarDaFolha(el, close, () => run(...))` (a folha só fecha quando a planilha confirmar; se falhar, o que foi digitado fica) e `formErr(el, campo, msg)` para erro junto do campo. Escolhas usam `pressed()`/`marca()` (aria-pressed). Trocar o mês sempre pede confirmação.
+
+## Regras do mês (combinadas com o Gabriel em 2026-10-22)
+
+- **Contas fixas:** a Rosany lança o valor certo todo mês. O **Fechar o mês** deixa só a coluna Valor (C) em branco; nome, dia, "sai de" e "onde pagar" ficam. O app mostra "Lançar" e o valor do mês passado (lido do topo de ANTERIORES).
+- **Pensão do Carlos = 5.000 fixos + contas extras.** Tudo que ele manda é pagamento da pensão.
+  - **Extra do Carlos** (compra que ele paga, fora dos cartões): no botão Compra → "Extra do Carlos". Vai para o bloco "O QUE O CARLOS DÁ" com `EXTRA` na coluna B e sai no fechamento. Itens sem `EXTRA` (Netflix, INSS…) são fixos e ficam.
+  - **Dinheiro que o Carlos mandou no meio do mês:** linha `CARLOS` nas "outras entradas" (B = data, C = valor). Soma na Sobra final e, depois do ajuste da planilha descrito em `PLANILHA-AJUSTE-CARLOS.md`, abate da diferença do Carlos. Sai no fechamento.
 
 ## Arquivos
 

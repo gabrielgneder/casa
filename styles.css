@@ -413,6 +413,7 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
   min-height: 62px; border-radius: 14px; border: 0; font-weight: 800; font-size: .95rem; padding: 8px 10px; color: #fff;
   text-align: left; box-shadow: 0 1px 3px rgba(0,0,0,.2); text-shadow: var(--sh, none); position: relative;
 }
+.cardpick button.on { padding-right: 36px; } /* o ✓ não fica por cima do nome */
 .cardpick button.on { outline: 4px solid var(--ink); outline-offset: 2px; }
 .cardpick button.on::after { content: "✓"; position: absolute; right: 10px; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: #fff; color: #1b1f1d; display: grid; place-items: center; font-size: .9rem; text-shadow: none; }
 .stepper { display: flex; align-items: center; gap: 10px; }
@@ -497,3 +498,14 @@ body.no-app .tabs, body.no-app .fab, body.no-app .top button { visibility: hidde
 
 /* título da tela só para leitores de tela (VoiceOver); o título visível é o mês no topo */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---------- contas a lançar, extras e dinheiro do Carlos ---------- */
+/* conta fixa ainda sem valor neste mês: fundo de aviso e "Lançar" no lugar do valor */
+.item.falta { background: var(--warn-bg); }
+.item.falta .item-s { color: var(--warn-ink); }
+.lancar { display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--warn-ink); color: var(--warn-bg); font-size: .9rem; font-weight: 800; }
+/* "Extra do Carlos" no seletor de cartão: não é cartão, então não tem cor de marca */
+.cardpick .pick-extra { padding-right: 36px; background: var(--surface); color: var(--ink); text-shadow: none; box-shadow: inset 0 0 0 2px var(--ring); display: flex; flex-direction: column; justify-content: center; line-height: 1.2; }
+.cardpick .pick-extra small { font-size: .78rem; font-weight: 700; color: var(--ink-3); margin-top: 2px; }
+.tag.tag-extra { background: var(--brand-2); color: var(--brand); box-shadow: none; }
+.sub-lista { margin: 20px 4px 8px; font-size: .95rem; font-weight: 800; color: var(--ink-2); }
