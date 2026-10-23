@@ -142,12 +142,13 @@ const RANGES = ["CASA!A1:H900", "CASA!X1:Y900", "Tabelas!A2:D300"];
 async function readGrid() {
   const q = RANGES.map(r => "ranges=" + encodeURIComponent(r)).join("&");
   // o último mês fechado fica no topo de ANTERIORES: dá o "mês passado" das contas fixas (se falhar, segue sem)
-  const [j, prev] = await Promise.all([
+  const [j, prev, fixMes] = await Promise.all([
     api(`/values:batchGet?${q}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`),
     readRange("ANTERIORES!A1:C220").catch(() => []),
+    lerFixMes().catch(() => []),
   ]);
   const [main, helper, tab] = j.valueRanges.map(v => v.values || []);
-  return { main, helper, tab, prev };
+  return { main, helper, tab, prev, fixMes };
 }
 
 // Acha cada bloco da aba CASA pelos títulos da coluna A (assim o app continua
@@ -197,6 +198,9 @@ function parse(g) {
   const P = g.prev || [], pA = i => norm((P[i] || [])[0]);
   const pi = P.findIndex((_, i) => pA(i) === "CONTAS FIXAS");
   if (pi >= 0) for (let i = pi + 1; i < P.length && pA(i) !== "TOTAL CONTAS FIXAS"; i++) { const val = (P[i] || [])[2]; if (pA(i) && typeof val === "number") m.prevFixas[pA(i)] = val; }
+  // se o mês anterior tem valores na aba FIXAS POR MÊS, eles valem mais que ANTERIORES
+  const antes = m.cur && months.find(x => x.idx === m.cur.idx - 1);
+  if (antes) for (const [mes, conta, val] of g.fixMes || []) if (norm(mes) === norm(antes.label) && typeof val === "number") m.prevFixas[norm(conta)] = val;
 
   // resultado
   const rRes = need(find(titulo("RESULTADO DO MÊS")), "RESULTADO DO MÊS");
@@ -284,6 +288,57 @@ async function sameRow(row, nome, col = "A") {
   if (cur !== String(nome || "").trim()) throw new Error("Essa linha mudou na planilha (talvez outra pessoa mexeu). Atualizei a tela, tente de novo.");
 }
 
+// Contas fixas mês a mês (pedido da Rosany): a coluna Valor (C) da CASA mostra só o mês que está na tela.
+// O valor de cada mês fica guardado na aba oculta FIXAS POR MÊS (A = mês, B = conta, C = valor).
+// Trocar de mês ou fechar o mês: guarda os valores do mês atual lá e põe na coluna C os do mês novo
+// (mês que nunca foi lançado começa zerado: em branco, "Lançar").
+const FIXTAB = "FIXAS POR MÊS", FIXRANGE = `'${FIXTAB}'!A2:C3000`;
+async function lerFixMes() { return readRange(FIXRANGE); }
+// para gravar: só aceita "vazio" se a aba ainda não existe (erro de leitura não pode apagar o histórico)
+async function lerFixMesSeguro() {
+  if (!DEMO) {
+    const meta = await api("?fields=sheets.properties(title)");
+    if (!meta.sheets.some(s => s.properties.title === FIXTAB)) return [];
+  }
+  return lerFixMes();
+}
+async function garanteFixTab() {
+  if (DEMO) return;
+  const meta = await api("?fields=sheets.properties(title)");
+  if (meta.sheets.some(s => s.properties.title === FIXTAB)) return;
+  await api(":batchUpdate", { method: "POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: FIXTAB, hidden: true } } }] }) });
+  await writeRaw([{ range: `'${FIXTAB}'!A1:C1`, values: [["MÊS", "CONTA", "VALOR"]] }]);
+}
+// lê de novo, na planilha, o mês da tela e as contas fixas (nome e valor)
+async function fixasAgora() {
+  const [g, rows] = await Promise.all([readGrid(), lerFixMesSeguro()]), m = parse(g);
+  return { m, rows, fixas: m.fixas.filter(f => f.nome) };
+}
+// troca, na lista guardada, os valores do mês `mes` pelos que estão na coluna C agora
+function guardaMes(rows, mes, fixas) {
+  const outros = rows.filter(r => r[0] !== undefined && r[0] !== "" && norm(r[0]) !== norm(mes));
+  return outros.concat(fixas.filter(f => f.valor !== "").map(f => [mes, f.nome, f.valor]));
+}
+async function gravaFixMes(rows) {
+  await garanteFixTab();
+  await clearRanges([FIXRANGE]);
+  if (rows.length) await writeRaw([{ range: `'${FIXTAB}'!A2:C${rows.length + 1}`, values: rows }]);
+}
+// valores da coluna C para mostrar o mês `mes` (o que foi guardado dele; o resto em branco)
+function valoresDoMes(rows, mes, fixas) {
+  return fixas.map(f => {
+    const r = rows.find(x => norm(x[0]) === norm(mes) && norm(x[1]) === norm(f.nome));
+    return { range: `CASA!C${f.row}`, values: [[r && r[2] !== undefined ? r[2] : ""]] };
+  });
+}
+// depois de salvar/apagar uma conta: atualiza o que está guardado do mês da tela (e o nome, se mudou)
+async function sincronizaFixas(antes, nome) {
+  const { m, rows, fixas } = await fixasAgora();
+  let r = guardaMes(rows, m.mes, fixas);
+  if (antes && nome && norm(antes) !== norm(nome)) r = r.map(x => (norm(x[1]) === norm(antes) ? [x[0], nome, x[2]] : x));
+  await gravaFixMes(r);
+}
+
 const OPS = {
   async addCompra({ lista, nome, valor, data, parc, fat }) {
     const l = S.m.listas.find(x => x.nome === lista);
@@ -321,11 +376,13 @@ const OPS = {
       { range: `CASA!A${row}:C${row}`, values: [[nome, dia, valor]] },
       { range: `CASA!E${row}:F${row}`, values: [[saide, onde]] },
     ]);
+    await sincronizaFixas(antes, nome);
     return "Conta salva.";
   },
   async delFixa({ row, antes }) {
     await sameRow(row, antes);
     await clearRanges([`CASA!A${row}:C${row}`, `CASA!E${row}:F${row}`]);
+    await sincronizaFixas();
     return "Conta apagada.";
   },
   async saveEntrada({ row, nome, valor, principal }) {
@@ -393,7 +450,11 @@ const OPS = {
     return "Linha apagada.";
   },
   async setMes({ label }) {
-    await writeRaw([{ range: "CASA!B2", values: [[label]] }]);
+    // guarda as contas fixas do mês que sai e mostra as do mês que entra
+    const { m, rows, fixas } = await fixasAgora();
+    const r = guardaMes(rows, m.mes, fixas);
+    await gravaFixMes(r);
+    await writeRaw([{ range: "CASA!B2", values: [[label]] }, ...valoresDoMes(r, label, fixas)]);
     return null;
   },
   async fecharMes() { return fecharMes(); },
@@ -476,8 +537,11 @@ async function fecharMes() {
   // 3) passa para o mês seguinte e limpa os vencimentos mudados à mão
   data.push({ range: "CASA!B2", values: [[prox.label]] });
   for (const c of m.cartoes) data.push({ range: `CASA!H${c.row}`, values: [[""]] });
-  // 4) contas fixas: só o valor fica em branco (ela lança o valor certo do mês; o do mês passado fica em ANTERIORES)
-  for (const f of m.fixas) if (f.nome) data.push({ range: `CASA!C${f.row}`, values: [[""]] });
+  // 4) contas fixas: os valores do mês ficam guardados em FIXAS POR MÊS; o mês seguinte começa zerado
+  //    (ou com o que já tiver sido lançado para ele)
+  const fixas = m.fixas.filter(f => f.nome), guardadas = guardaMes(await lerFixMesSeguro(), m.mes, fixas);
+  await gravaFixMes(guardadas);
+  data.push(...valoresDoMes(guardadas, prox.label, fixas));
   // 5) extras do Carlos e dinheiro que ele mandou no meio do mês: eram deste mês, saem
   for (const x of m.carlos.extras) if (x.extra) data.push({ range: `CASA!A${x.row}:C${x.row}`, values: [["", "", ""]] });
   for (const e of m.entradas) if (e.carlos) data.push({ range: `CASA!A${e.row}:C${e.row}`, values: [["", "", ""]] });
@@ -1280,7 +1344,7 @@ document.addEventListener("click", async e => {
     case "edit-envio-carlos": return envioCarlosSheet(m.entradas.find(x => x.row === row));
     case "fechar": {
       const prox = m.cur ? monthByIdx(m.cur.idx + 1) : null;
-      if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>As compras que já acabaram saem das listas, os <b>valores das contas fixas</b> ficam em branco para lançar de novo, e os <b>extras do Carlos</b> e o dinheiro que ele mandou no mês saem.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
+      if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>As compras que já acabaram saem das listas, os <b>valores das contas fixas</b> ficam guardados e o mês novo começa zerado, e os <b>extras do Carlos</b> e o dinheiro que ele mandou no mês saem.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
         run("fecharMes", {}, { busyText: "Fechando o mês…" });
       return;
     }
@@ -1338,13 +1402,15 @@ const Demo = {
       // A:E de uma compra: faz o papel das fórmulas de SITUAÇÃO e NO MÊS (o resto dos totais não recalcula)
       if (c0 === 1 && values.every(row => row.length === 5)) values.forEach((_, i) => this.simulaCompra(r0 - 1 + i));
     };
-    if (path.startsWith("/values:batchUpdate")) { JSON.parse(opts.body).data.forEach(d => put(d.range, d.values)); return {}; }
+    const fixTab = r => r.startsWith(`'${FIXTAB}'!`);
+    if (path.startsWith("/values:batchUpdate")) { JSON.parse(opts.body).data.forEach(d => (fixTab(d.range) ? d.range.includes("!A2") && (this.g.fixMes = d.values) : put(d.range, d.values))); return {}; }
     if (path.startsWith("/values:batchClear")) {
-      JSON.parse(opts.body).ranges.forEach(r => { const mm = /!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?/.exec(r); const a = mm[1].charCodeAt(0), b = (mm[3] || mm[1]).charCodeAt(0); put(r.split(":")[0], [Array.from({ length: b - a + 1 }, () => "")]); });
+      JSON.parse(opts.body).ranges.forEach(r => { if (fixTab(r)) { this.g.fixMes = []; return; } const mm = /!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?/.exec(r); const a = mm[1].charCodeAt(0), b = (mm[3] || mm[1]).charCodeAt(0); put(r.split(":")[0], [Array.from({ length: b - a + 1 }, () => "")]); });
       return {};
     }
     if (path.startsWith("/values/")) {
       const range = decodeURIComponent(path.slice(8).split("?")[0]);
+      if (fixTab(range)) return { values: this.g.fixMes || [] };
       if (!range.startsWith("CASA!")) return { values: this.g.prev || [] };
       const mm = /!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?/.exec(range);
       const c0 = mm[1].charCodeAt(0) - 65, c1 = (mm[3] || mm[1]).charCodeAt(0) - 65, r0 = Number(mm[2]), r1 = Number(mm[4] || mm[2]);

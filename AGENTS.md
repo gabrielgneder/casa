@@ -18,7 +18,7 @@ PWA estático (HTML + CSS + JS puro, sem build, sem framework, sem backend) para
 
 ## Regras do mês (combinadas com o Gabriel em 2026-10-22)
 
-- **Contas fixas:** a Rosany lança o valor certo todo mês. O **Fechar o mês** deixa só a coluna Valor (C) em branco; nome, dia, "sai de" e "onde pagar" ficam. O app mostra "Lançar" e o valor do mês passado (lido do topo de ANTERIORES).
+- **Contas fixas são de cada mês** (pedido da Rosany em 22/10/2026): a coluna Valor (C) da CASA mostra só o mês da tela. O valor de cada mês fica na aba oculta **FIXAS POR MÊS** (A = mês como em B2, B = conta, C = valor; criada pelo app se faltar). Trocar o mês (setas) e Fechar o mês guardam os valores do mês que sai e põem na coluna C os do mês que entra; mês nunca lançado começa em branco ("Lançar"). Salvar/apagar conta atualiza o mês da tela (e o nome em todos os meses, se mudou). Nome, dia, "sai de" e "onde pagar" valem para todos os meses. O "mês passado" vem dessa aba (ou do topo de ANTERIORES). Antes de regravar a aba, o app lê de novo e só aceita vazio se a aba não existir (`lerFixMesSeguro`) — nunca use `g.fixMes` do cache para gravar.
 - **Pensão do Carlos = 5.000 fixos + contas extras.** Tudo que ele manda é pagamento da pensão.
   - **Extra do Carlos** (compra que ele paga, fora dos cartões): no botão Compra → "Extra do Carlos". Vai para o bloco "O QUE O CARLOS DÁ" com `EXTRA` na coluna B e sai no fechamento. Itens sem `EXTRA` (Netflix, INSS…) são fixos e ficam.
   - **Dinheiro que o Carlos mandou no meio do mês:** linha `CARLOS` nas "outras entradas" (B = data, C = valor). Soma na Sobra final e abate (ajuste da planilha em `PLANILHA-AJUSTE-CARLOS.md`, já feito) da diferença do Carlos. Sai no fechamento.
