@@ -138,7 +138,7 @@ async function fetchEmail() {
 }
 
 /* ======================= leitura da planilha ======================= */
-const RANGES = ["CASA!A1:H900", "CASA!X1:Y900", "Tabelas!A2:D300"];
+const RANGES = ["CASA!A1:H900", "CASA!X1:Y900", "Tabelas!A2:F300"];
 async function readGrid() {
   const q = RANGES.map(r => "ranges=" + encodeURIComponent(r)).join("&");
   // o último mês fechado fica no topo de ANTERIORES: dá o "mês passado" das contas fixas (se falhar, segue sem)
@@ -273,6 +273,114 @@ function parse(g) {
   return m;
 }
 
+/* ======================= ver outro mês só neste celular ======================= */
+// Pedido de 24/10/2026: as setas mudam o mês só para quem está usando; a planilha (B2) fica onde está, para todos.
+// Aqui o app refaz, numa cópia dos valores lidos, as contas que as fórmulas da CASA fazem para o mês escolhido
+// (mesmas regras de SITUAÇÃO, NO MÊS, faturas, vencimentos, contas fixas e resultado). Nada é gravado.
+// O que é só do mês da planilha (outras entradas, dinheiro que o Carlos mandou, extras do Carlos, vencimento
+// mudado à mão) fica em branco nos outros meses.
+const fimDe = it => (it.parc === "FIXO" || num(it.fim) >= 999999 ? Infinity : num(it.fim));
+const iniDe = it => (typeof it.ini === "number" ? it.ini : 99999);
+const noMesDe = (it, z) => (iniDe(it) <= z && z <= fimDe(it) ? num(it.valor) : 0);
+function sitDe(it, z) {
+  if (!it.nome && it.valor === "") return "";
+  if (it.fat === "") return "ESCOLHA A 1ª FATURA";
+  if (z < iniDe(it)) return "FUTURA";
+  if (z > fimDe(it)) return "ACABOU";
+  if (it.parc === "FIXO") return "FIXO";
+  const n = Math.max(1, parseInt(it.parc, 10) || 1);
+  return n === 1 ? "À VISTA" : `P ${z - iniDe(it) + 1}/${n}`;
+}
+// WORKDAY(DATE(ano; mês; dia) − 1; 1; feriados): o próprio dia, ou o próximo dia útil
+function vencDe(serialMes, dia, feriados) {
+  const d0 = fromSerial(serialMes);
+  let s = toSerial(new Date(d0.getUTCFullYear(), d0.getUTCMonth(), dia));
+  for (;;) { const w = fromSerial(s).getUTCDay(); if (w !== 0 && w !== 6 && !feriados.has(s)) return s; s++; }
+}
+// meses que dá para ver: até 12 para a frente; para trás, só os que ainda não foram fechados
+// (num mês fechado as compras que acabaram já saíram das listas; o resumo dele está em ANTERIORES)
+function limitesVer(m0, g) {
+  const cur = m0.cur.idx, topo = norm(((g.prev || [])[3] || [])[0] || "");
+  const fechado = m0.months.find(x => x.idx < cur && topo.startsWith(norm(x.nome)));
+  return { min: Math.max(cur - 12, fechado ? fechado.idx + 1 : -Infinity), max: cur + 12 };
+}
+function verMes(g, label) {
+  const m0 = parse(g), alvo = label && m0.months.find(x => norm(x.label) === norm(label));
+  m0.planilha = m0.cur; m0.lim = m0.cur ? limitesVer(m0, g) : null;
+  if (!alvo || !m0.cur || alvo.idx === m0.cur.idx) return m0;
+  const z = alvo.idx, R = m0.ranges, main = g.main.map(r => (r ? r.slice() : []));
+  const set = (r, c, val) => { (main[r - 1] || (main[r - 1] = []))[c - 1] = val; };
+  const guardado = nome => { const r = (g.fixMes || []).find(x => norm(x[0]) === norm(alvo.label) && norm(x[1]) === norm(nome)); return r && typeof r[2] === "number" ? r[2] : ""; };
+  const feriados = new Set((g.tab || []).map(r => r[5]).filter(x => typeof x === "number"));
+  set(2, 2, alvo.label);
+  // entradas: 1º e 2º do mês guardados; datas como as fórmulas (último dia do mês anterior e dia 5)
+  const v1 = guardado(ENTRADA[0]), v2 = guardado(ENTRADA[1]);
+  for (const e of m0.entradas) {
+    const k = e.row - R.rEnt;
+    if (k === 1) { set(e.row, 2, alvo.serial - 1); set(e.row, 3, v1); }
+    else if (k === 2) { set(e.row, 2, alvo.serial + 4); set(e.row, 3, v2); }
+    else if (e.carlos) { set(e.row, 1, ""); set(e.row, 2, ""); set(e.row, 3, ""); }
+    else set(e.row, 3, "");
+  }
+  const entrou = num(v1) + num(v2);
+  set(R.rTotEnt, 3, entrou);
+  // compras: SITUAÇÃO, NO MÊS e total de cada lista
+  const totLista = new Map(), prevLista = new Map();
+  for (const l of m0.listas) {
+    let t = 0, pv = 0;
+    for (const it of l.itens) {
+      const nm = noMesDe(it, z); t += nm;
+      if (iniDe(it) < z && fimDe(it) >= z) pv += num(it.valor);
+      set(it.row, 6, sitDe(it, z)); set(it.row, 7, it.nome || it.valor !== "" ? nm : "");
+    }
+    t = Math.round(t * 100) / 100;
+    set(l.totalRow, 7, t); totLista.set(l, t); prevLista.set(l, pv);
+  }
+  // cartões: vencimento do mês (sem a data mudada à mão, que é do mês da planilha) e fatura
+  const doCartao = nome => m0.listas.filter(l => l.card === nome);
+  const cards = new Map();
+  for (const c of m0.cartoes) {
+    const venc = vencDe(alvo.serial, c.dia, feriados), fat = Math.round(doCartao(c.nome).reduce((a, l) => a + totLista.get(l), 0) * 100) / 100;
+    set(c.row, 5, venc); set(c.row, 6, fat); set(c.row, 8, "");
+    cards.set(norm(c.nome), { venc, fat, prev: doCartao(c.nome).reduce((a, l) => a + prevLista.get(l), 0) });
+  }
+  const soma = { "1º DINHEIRO": [0, 0], "2º DINHEIRO": [0, 0] }; // [valor, já previsto]
+  for (const f of m0.faturas) {
+    const k = [...cards.keys()].find(n => norm(f.nome) === n) || [...cards.keys()].find(n => norm(f.nome).startsWith(n));
+    const c = k && cards.get(k); if (!c) continue;
+    set(f.row, 2, c.venc); set(f.row, 3, c.fat); set(f.row, 4, Math.round(c.prev * 100) / 100);
+    if (soma[f.saide]) { soma[f.saide][0] += c.fat; soma[f.saide][1] += c.prev; }
+  }
+  // contas fixas: valores guardados do mês (mês nunca lançado = em branco)
+  let totFix = 0;
+  for (const f of m0.fixas) {
+    const v = f.nome ? guardado(f.nome) : "";
+    set(f.row, 3, v); set(f.row, 4, v);
+    if (f.saide !== "NO CARTÃO") totFix += num(v);
+    if (soma[f.saide]) { soma[f.saide][0] += num(v); soma[f.saide][1] += num(v); }
+  }
+  set(R.rTotFix, 3, totFix);
+  // resultado (fórmulas da CASA, sem as outras entradas e os envios do Carlos, que são do mês da planilha)
+  const r2 = x => Math.round(x * 100) / 100;
+  const sobra1 = r2(num(v1) - soma["1º DINHEIRO"][0]);
+  set(R.rRes + 1, 3, sobra1);
+  set(R.rRes + 2, 3, r2(num(v2) + sobra1 - soma["2º DINHEIRO"][0]));
+  set(R.rRes + 3, 3, r2(entrou - soma["1º DINHEIRO"][1] - soma["2º DINHEIRO"][1]));
+  // Carlos: os extras são do mês da planilha; o Nubank do Carlos é a lista dele neste mês
+  let totCarlos = num(m0.carlos.mensal);
+  for (const x of m0.carlos.extras) { if (x.extra) { set(x.row, 1, ""); set(x.row, 2, ""); set(x.row, 3, ""); } else totCarlos += num(x.valor); }
+  const lc = m0.listas.find(l => /CARLOS/.test(norm(l.nome))), nu = lc ? totLista.get(lc) : 0;
+  totCarlos = r2(totCarlos + nu);
+  set(R.rNu, 3, nu); set(R.rNu + 1, 3, totCarlos); set(R.rNu + 2, 3, entrou); set(R.rNu + 3, 3, r2(entrou - totCarlos));
+  const m = parse({ ...g, main });
+  // próximos 12 meses de cada lista, a partir do mês visto
+  m.proj = { meses: [], linhas: {} };
+  for (let i = 0; i < 12; i++) { const x = m.months.find(y => y.idx === z + i); m.proj.meses.push(x ? x.label : ""); }
+  for (const l of m.listas) m.proj.linhas[norm(l.nome)] = m.proj.meses.map((_, i) => r2(l.itens.reduce((a, it) => a + noMesDe(it, z + i), 0)));
+  m.planilha = m0.cur; m.lim = m0.lim; m.vendo = true;
+  return m;
+}
+
 const monthByIdx = idx => (S.m ? S.m.months.find(x => x.idx === idx) : null);
 const monthByLabel = lbl => (S.m ? S.m.months.find(x => x.label === lbl) : null);
 // Mesma regra da planilha: comprou no melhor dia ou depois → pula uma fatura;
@@ -364,6 +472,12 @@ function valoresDoMes(rows, mes, fixas) {
     return { range: `CASA!C${f.row}`, values: [[r && r[2] !== undefined ? r[2] : ""]] };
   });
 }
+// olhando outro mês (só no celular): o valor da conta ou do 1º/2º dinheiro vai direto para FIXAS POR MÊS
+async function guardaNoMes(nome, valor) {
+  const mes = S.m.mes, rows = (await lerFixMesSeguro()).filter(r => r[0] !== undefined && r[0] !== "" && !(norm(r[0]) === norm(mes) && norm(r[1]) === norm(nome)));
+  if (valor !== "" && valor !== null) rows.push([mes, nome, valor]);
+  await gravaFixMes(rows);
+}
 // depois de salvar/apagar uma conta: atualiza o que está guardado do mês da tela (e o nome, se mudou)
 async function sincronizaFixas(antes, nome) {
   const { m, rows, fixas } = await fixasAgora();
@@ -440,10 +554,11 @@ const OPS = {
       await sameRow(row, "");
     }
     await writeRaw([
-      { range: `CASA!A${row}:C${row}`, values: [[nome, dia, valor]] },
+      S.m.vendo ? { range: `CASA!A${row}:B${row}`, values: [[nome, dia]] } : { range: `CASA!A${row}:C${row}`, values: [[nome, dia, valor]] },
       { range: `CASA!E${row}:F${row}`, values: [[saide, onde]] },
     ]);
     await sincronizaFixas(antes, nome);
+    if (S.m.vendo) await guardaNoMes(nome, valor);
     const ja = S.m.fixas.find(x => x.row === row);
     const tinha = ja && ja.pago && !ja.pago.lista && saide !== "NO CARTÃO";
     if (antes && norm(antes) !== norm(nome) && ja && ja.pago) await mudaPag(S.m.mes, "CONTA", antes, null);
@@ -508,6 +623,7 @@ const OPS = {
     return "Conta apagada.";
   },
   async saveEntrada({ row, nome, valor, principal }) {
+    if (S.m.vendo && principal) { await guardaNoMes(ENTRADA[row - S.m.ranges.rEnt - 1], valor); return "Entrada salva."; }
     const data = principal ? [{ range: `CASA!C${row}`, values: [[valor]] }] : [{ range: `CASA!A${row}`, values: [[nome]] }, { range: `CASA!C${row}`, values: [[valor]] }];
     await writeRaw(data);
     return "Entrada salva.";
@@ -560,7 +676,8 @@ const OPS = {
     return "Apagado.";
   },
   async saveCartao({ row, dia, melhor, ajuste }) {
-    await writeRaw([{ range: `CASA!C${row}:D${row}`, values: [[dia, melhor]] }, { range: `CASA!H${row}`, values: [[ajuste === null ? "" : ajuste]] }]);
+    // o vencimento mudado à mão (H) é do mês da planilha: olhando outro mês, não mexe
+    await writeRaw([{ range: `CASA!C${row}:D${row}`, values: [[dia, melhor]] }, ...(S.m.vendo ? [] : [{ range: `CASA!H${row}`, values: [[ajuste === null ? "" : ajuste]] }])]);
     return "Cartão salvo.";
   },
   async savePorquinho({ row, data, inter, mp, obs }) {
@@ -594,8 +711,15 @@ function relogin() { if (canSilent()) googleLogin(true); else googleLogin(); }
 
 // run.erro guarda a última mensagem de erro (a folha mostra ela junto do botão Salvar).
 const SEM_NET = "Sem internet agora. Nada foi salvo ainda.";
+// o que só existe no mês da planilha não pode ser feito olhando outro mês
+const soPlanilha = (op, a) => ["addExtraCarlos", "saveEnvioCarlos", "delEnvioCarlos", "fecharMes"].includes(op)
+  || (op === "saveEntrada" && !a.principal) || (op === "saveCarlos" && !a.row && !a.mensal);
 async function run(op, args, { busyText = "Salvando…", quieto = false } = {}) {
   run.erro = null;
+  if (S.m && S.m.vendo && soPlanilha(op, args)) {
+    run.erro = `Isso é do mês da planilha (${titleCase(S.m.planilha.nome)}). Volte para ele com as setas.`;
+    toast(run.erro, true); return false;
+  }
   if (!DEMO && !Token.get()) { store.set("pending", { op, args }); run.erro = "Conectando ao Google…"; toast(run.erro); relogin(); return false; }
   if (!DEMO && navigator.onLine === false) { run.erro = SEM_NET; toast(SEM_NET, true); return false; }
   busy(busyText);
@@ -677,14 +801,16 @@ async function fecharMes() {
 }
 
 /* ======================= estado e carregamento ======================= */
-const S = { m: null, at: null, tab: "inicio", card: null, loading: false, err: null };
+const S = { m: null, g: null, ver: null, at: null, tab: "inicio", card: null, loading: false, err: null };
+// mês que este celular está vendo (null = o da planilha); some quando fecha o app
+function montaM(g) { S.g = g; S.m = verMes(g, S.ver); if (!S.m.vendo) S.ver = null; }
 
 async function refresh({ quiet = false } = {}) {
   if (!DEMO && !Token.get()) { renderBanner(); render(); return; }
   S.loading = true; if (!quiet) renderStatus();
   try {
     const g = await readGrid();
-    S.m = parse(g); S.at = Date.now(); S.err = null;
+    montaM(g); S.at = Date.now(); S.err = null;
     store.set("cache", { g, at: S.at });
   } catch (e) {
     if (e instanceof AuthError) S.err = null; else S.err = e.message;
@@ -731,8 +857,11 @@ function render() {
   if (!S.m) { main.innerHTML = loginHtml(); $("#mes-nome").textContent = "Casa"; return; }
   const m = S.m;
   $("#mes-nome").textContent = m.cur ? titleCase(m.cur.nome) : m.mes;
-  $("#mes-prev").disabled = !m.cur || !monthByIdx(m.cur.idx - 1);
-  $("#mes-next").disabled = !m.cur || !monthByIdx(m.cur.idx + 1);
+  const lim = m.lim;
+  $("#mes-prev").disabled = !m.cur || !lim || m.cur.idx - 1 < lim.min || !monthByIdx(m.cur.idx - 1);
+  $("#mes-next").disabled = !m.cur || !lim || m.cur.idx + 1 > lim.max || !monthByIdx(m.cur.idx + 1);
+  $(".top-label").textContent = m.vendo ? "Só neste celular" : "Mês";
+  $(".top").classList.toggle("vendo", !!m.vendo);
   $$(".tabs [data-tab]").forEach(b => { const on = b.dataset.tab === S.tab || (S.tab === "cartao" && b.dataset.tab === "cartoes"); b.classList.toggle("on", on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); });
   const views = { inicio: viewInicio, cartoes: viewCartoes, contas: viewContas, mais: viewMais, cartao: viewCartao };
   const corpo = (views[S.tab] || viewInicio)(); // pode trocar S.tab (cartão que sumiu volta para Cartões)
@@ -1108,8 +1237,9 @@ function viewMais() {
     ${secHead("Fim do mês", "", "#5c7cfa")}
     <div class="endmonth">
       <span class="ico" style="--ic:#5c7cfa"><svg><use href="#i-calendar"/></svg></span>
-      <p>Quando tudo do mês estiver pago: guarda o mês em ANTERIORES, tira as compras que já acabaram e passa para o mês seguinte.</p>
-      <button class="btn" data-act="fechar">Fechar ${esc(m.cur ? titleCase(m.cur.nome) : "o mês")}</button>
+      <p>${m.vendo ? `Você está vendo ${esc(titleCase(m.cur.nome))} só neste celular. A planilha está em <b>${esc(titleCase(m.planilha.nome))}</b> para todos; o mês se fecha por lá.` : "Quando tudo do mês estiver pago: guarda o mês em ANTERIORES, tira as compras que já acabaram e passa para o mês seguinte."}</p>
+      ${m.vendo ? `<button class="btn ghost" data-act="mes-todos">Pôr a planilha em ${esc(titleCase(m.cur.nome))} para todos</button>`
+        : `<button class="btn" data-act="fechar">Fechar ${esc(m.cur ? titleCase(m.cur.nome) : "o mês")}</button>`}
     </div>
 
     ${secHead("Dia e noite", "cores da tela", "#fab005")}
@@ -1778,6 +1908,7 @@ document.addEventListener("click", async e => {
     case "edit-pix": { const p = m.pix[Number(t.dataset.i)]; return p ? pixSheet(p) : null; }
     case "novo-pix": return pixSheet(null);
     case "edit-envio-carlos": return envioCarlosSheet(m.entradas.find(x => x.row === row));
+    case "mes-todos": return mesParaTodos();
     case "fechar": {
       const prox = m.cur ? monthByIdx(m.cur.idx + 1) : null;
       if (await confirmSheet("Fechar o mês?", `O mês de <b>${esc(m.cur ? titleCase(m.cur.nome) : m.mes)}</b> vai ser guardado em ANTERIORES e a planilha passa para <b>${esc(prox ? titleCase(prox.nome) : "o mês seguinte")}</b>.<br><br>As compras que já acabaram saem das listas, os <b>valores das contas fixas e do 1º e 2º dinheiro</b> ficam guardados e o mês novo começa zerado, e os <b>extras do Carlos</b> e o dinheiro que ele mandou no mês saem.<br><br>Faça isso só quando tudo do mês estiver pago.`, "Sim, fechar o mês"))
@@ -1800,11 +1931,16 @@ document.addEventListener("click", async e => {
 });
 $$(".tabs [data-tab]").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); scrollTo({ top: 0 }); });
 $("#fab").onclick = () => S.m && compraSheet({ cardNome: S.tab === "cartao" ? S.card : null });
-// Trocar o mês muda a planilha para todo mundo: pede confirmação sempre (um toque sem querer na seta não basta).
-const mudaMes = async (d, alvo) => {
-  const x = alvo || (S.m && S.m.cur ? monthByIdx(S.m.cur.idx + d) : null);
-  if (!x) return;
-  const ok = await confirmSheet("Trocar o mês da planilha?", `A planilha vai mostrar <b>${esc(titleCase(x.nome))}</b> para todo mundo que usa, a Maria também.`, `Mostrar ${titleCase(x.nome)}`);
+// As setas mudam o mês só neste celular (a planilha continua no mês dela para todo mundo): sem confirmação.
+const mudaMes = d => {
+  const x = S.m && S.m.cur ? monthByIdx(S.m.cur.idx + d) : null;
+  if (!x || !S.g) return;
+  S.ver = x.label; montaM(S.g); render();
+};
+// pôr a planilha (B2) no mês que está na tela, para todos: só em Mais, com confirmação
+const mesParaTodos = async () => {
+  const x = S.m && S.m.cur; if (!x || !S.m.vendo) return;
+  const ok = await confirmSheet("Mudar o mês da planilha?", `A planilha vai mostrar <b>${esc(titleCase(x.nome))}</b> para todo mundo que usa, a Maria também.`, `Mudar para ${titleCase(x.nome)}`);
   if (!ok) return;
   if (await run("setMes", { label: x.label }, { busyText: "Trocando o mês…" })) toast(`A planilha agora está em ${titleCase(x.nome)}.`);
 };
@@ -1877,7 +2013,7 @@ const Demo = {
   // login venceu (dura ~1 h): renova sozinho antes de mostrar qualquer botão
   if (!DEMO && !oauth && !Token.get() && canSilent()) { googleLogin(true); return; }
   const cache = store.get("cache");
-  if (cache && cache.g) { try { S.m = parse(cache.g); S.at = cache.at; } catch (e) {} }
+  if (cache && cache.g) { try { montaM(cache.g); S.at = cache.at; } catch (e) {} }
   renderBanner(); render();
   if (oauth && oauth !== "ok" && oauth !== "silent-fail") toast(oauth, true);
   if (oauth === "ok") await fetchEmail();
