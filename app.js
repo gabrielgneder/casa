@@ -223,6 +223,9 @@ function parse(g) {
   m.carlos = { mensalRow: rCH + 1, mensal: v(rCH + 1, 3), extras: [], nubank: v(rNu, 3), total: v(rNu + 1, 3), entrou: v(rNu + 2, 3), dif: v(rNu + 3, 3) };
   // coluna B = "EXTRA": compra extra do mês (lançada pelo app), sai no fechamento; os outros itens são fixos
   for (let r = rCH + 2; r < rNu; r++) m.carlos.extras.push({ row: r, nome: A(r), valor: v(r, 3), extra: norm(v(r, 2)) === "EXTRA" });
+  // valor do Nubank que ela cobra no relatório do Carlos (PAGAMENTOS, TIPO = RELATORIO); vazio = o da fatura
+  const relNu = m.pagos.find(x => x.tipo === "RELATORIO" && norm(x.nome) === "NUBANK CARLOS");
+  m.carlos.nubankRel = relNu && typeof relNu.valor === "number" ? relNu.valor : null;
 
   // cartões
   const rCT = need(find(titulo("CARTÕES")), "CARTÕES");
@@ -545,6 +548,11 @@ const OPS = {
     await writeRaw([{ range: `CASA!A${row}:C${row}`, values: [["CARLOS", data, valor]] }]);
     OPS.ultimaLinha = row;
     return "Dinheiro do Carlos anotado.";
+  },
+  // Nubank do relatório do Carlos: só muda o relatório, o cartão continua igual (valor null = volta ao da fatura)
+  async saveNubankRel({ valor }) {
+    await mudaPag(S.m.mes, "RELATORIO", "NUBANK CARLOS", valor === null ? null : ["", valor]);
+    return valor === null ? "Voltou ao valor do cartão." : "Valor do relatório salvo.";
   },
   async delEnvioCarlos({ row }) {
     await sameRow(row, "CARLOS");
@@ -1058,6 +1066,15 @@ function viewContas() {
     </div>`;
 }
 
+// Relatório do Carlos: o que ela cobra dele no mês. O Nubank pode ter outro valor que o da fatura
+// (ela cobra mais ou menos); isso muda só o relatório, não o cartão nem as contas dela.
+function relCarlos(m) {
+  const c = m.carlos, mudou = c.nubankRel !== null, nubank = mudou ? c.nubankRel : num(c.nubank);
+  const total = Math.round((num(c.total) - num(c.nubank) + nubank) * 100) / 100;
+  const itens = [["MENSAL", num(c.mensal)], ...c.extras.filter(x => x.nome || x.valor !== "").map(x => [x.nome, num(x.valor)]), ["NUBANK DO CARLOS", nubank]];
+  return { mudou, nubank, total, dif: Math.round((num(c.entrou) - total) * 100) / 100, itens };
+}
+
 function viewMais() {
   const m = S.m, c = m.carlos;
   const ex = c.extras.filter(x => x.nome || x.valor !== "").map(x => `<button class="item" data-act="edit-carlos" data-row="${x.row}">
@@ -1069,16 +1086,17 @@ function viewMais() {
       <span class="ico" style="--ic:#e64980"><svg><use href="#i-piggy"/></svg></span>
       <span class="item-main"><span class="item-t">${p.data !== "" ? esc(fmtDate(p.data)) : "sem data"}</span><span class="item-s">Inter ${brl(p.inter)} · Merc. Pago ${brl(p.mp)}${p.obs ? ` · ${esc(p.obs)}` : ""}</span></span>
       <span class="item-v">${brl(p.total)}${p.dif !== "" ? `<small class="${num(p.dif) < 0 ? "neg" : "pos"}">${num(p.dif) >= 0 ? "▲ " : "▼ "}${brl(Math.abs(num(p.dif)))}</small>` : ""}</span></button>`).join("");
-  const email = store.get("email");
-  const difOk = Math.abs(num(c.dif)) < 0.01;
-  return `${secHead("Carlos", esc(m.cur ? titleCase(m.cur.nome) : m.mes), "#2f9e44")}
-    <div class="carlos"><span>Total do Carlos</span><b>${brl(c.total)}</b>
-      <small class="${difOk ? "pos" : "neg"}">${difOk ? "bate com o que entrou" : `diferença de ${brl(c.dif)} para o que entrou (${brl(c.entrou)})`}</small></div>
+  const email = store.get("email"), rel = relCarlos(m);
+  const difOk = Math.abs(rel.dif) < 0.01;
+  return `${secHead("Relatório Carlos", esc(m.cur ? titleCase(m.cur.nome) : m.mes), "#2f9e44")}
+    <div class="carlos"><span>Total do Carlos</span><b>${brl(rel.total)}</b>
+      <small class="${difOk ? "pos" : "neg"}">${difOk ? "bate com o que entrou" : `diferença de ${brl(rel.dif)} para o que entrou (${brl(c.entrou)})`}</small></div>
     <div class="list">
       <button class="item" data-act="edit-carlos-mensal"><span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span><span class="item-main"><span class="item-t">Mensal</span></span><span class="item-v">${brl(c.mensal)}</span></button>
       ${ex}
-      <div class="item">${miniCard("NUBANK")}<span class="item-main"><span class="item-t">Nubank do Carlos</span><span class="item-s">vem sozinho da lista do Nubank</span></span><span class="item-v">${brl(c.nubank)}</span></div>
+      <button class="item" data-act="edit-nubank-rel">${miniCard("NUBANK")}<span class="item-main"><span class="item-t">Nubank do Carlos</span><span class="item-s">${rel.mudou ? `no cartão: ${brl(c.nubank)} · mudou só aqui` : "vem do cartão · toque para mudar"}</span></span><span class="item-v">${brl(rel.nubank)}</span></button>
     </div>
+    <button class="btn" data-act="mandar-relatorio"><svg><use href="#i-share"/></svg>Mandar o relatório</button>
     <button class="btn ghost" data-act="novo-carlos"><svg><use href="#i-plus"/></svg>Novo item fixo do Carlos</button>
     ${envios ? `<p class="sub-lista">Dinheiro que o Carlos mandou neste mês</p><div class="list">${envios}</div>` : ""}
     <button class="btn ghost" data-act="novo-envio-carlos"><svg><use href="#i-plus"/></svg>O Carlos mandou dinheiro</button>
@@ -1374,9 +1392,73 @@ function reciboCompra({ args, row, antes, trocou }) {
   });
 }
 
+function nubankRelSheet() {
+  const c = S.m.carlos, mudou = c.nubankRel !== null;
+  openSheet("Nubank do Carlos", `
+    <p class="tip">Quanto cobrar do Carlos neste mês. Muda <b>só o relatório</b>: o cartão e as suas contas continuam iguais. No cartão está ${brl(c.nubank)}.</p>
+    <label class="field"><span>Valor no relatório</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 3.000,00" value="${esc(moneyInput(mudou ? c.nubankRel : c.nubank))}"></label>
+    <div class="stack"><button class="btn" id="f-ok">Salvar</button>${mudou ? `<button class="btn ghost" id="f-volta">Voltar ao valor do cartão (${brl(c.nubank)})</button>` : ""}</div>`, (el, close) => {
+    $("#f-ok", el).onclick = () => {
+      const v = parseMoney($("#f-valor", el).value);
+      if (v === null) return formErr(el, "#f-valor", "Digite o valor, por exemplo 3.000,00.");
+      salvarDaFolha(el, close, () => run("saveNubankRel", { valor: Math.abs(v - num(c.nubank)) < 0.005 ? null : v }));
+    };
+    const volta = $("#f-volta", el); if (volta) volta.onclick = () => salvarDaFolha(el, close, () => run("saveNubankRel", { valor: null }));
+    setTimeout(() => $("#f-valor", el).focus(), 300);
+  });
+}
+
+// Desenha o relatório do Carlos numa imagem (canvas, sem biblioteca) para mandar no WhatsApp.
+function relatorioCanvas() {
+  const m = S.m, rel = relCarlos(m), mes = m.cur ? titleCase(m.cur.nome) : m.mes;
+  const W = 1080, pad = 72, linhaH = 112, topo = 360, cv = document.createElement("canvas");
+  const H = topo + rel.itens.length * linhaH + 260;
+  cv.width = W; cv.height = H;
+  const x = cv.getContext("2d"), font = (peso, px) => `${peso} ${px}px -apple-system, "Segoe UI", Roboto, sans-serif`;
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, W, H);
+  const gr = x.createLinearGradient(0, 0, W, 260); gr.addColorStop(0, "#2b8a3e"); gr.addColorStop(1, "#1f6b30");
+  x.fillStyle = gr; x.fillRect(0, 0, W, 260);
+  x.fillStyle = "#ffffff"; x.font = font(800, 76); x.fillText("Relatório Carlos", pad, 130);
+  x.font = font(500, 44); x.fillStyle = "rgba(255,255,255,.85)"; x.fillText(mes, pad, 200);
+  // corta o nome se for comprido demais para caber antes do valor
+  const cabe = (t, max) => { if (x.measureText(t).width <= max) return t; while (t.length > 1 && x.measureText(t + "…").width > max) t = t.slice(0, -1); return t + "…"; };
+  rel.itens.forEach(([nome, valor], i) => {
+    const y = topo + i * linhaH;
+    if (i % 2) { x.fillStyle = "#f3f6f4"; x.fillRect(0, y - 70, W, linhaH); }
+    x.font = font(700, 46); x.fillStyle = "#1b1f1d"; x.textAlign = "right";
+    const v = brl(valor); x.fillText(v, W - pad, y);
+    const vw = x.measureText(v).width;
+    x.font = font(500, 46); x.fillStyle = "#2c3330"; x.textAlign = "left";
+    x.fillText(cabe(nome, W - pad * 2 - vw - 40), pad, y);
+  });
+  const yT = topo + rel.itens.length * linhaH;
+  x.fillStyle = "#2b8a3e"; x.fillRect(pad, yT - 40, W - pad * 2, 6);
+  x.font = font(800, 52); x.fillStyle = "#1b1f1d"; x.textAlign = "left"; x.fillText("Total", pad, yT + 70);
+  x.font = font(800, 72); x.fillStyle = "#2b8a3e"; x.textAlign = "right"; x.fillText(brl(rel.total), W - pad, yT + 76);
+  x.font = font(400, 34); x.fillStyle = "#7a827e"; x.textAlign = "left"; x.fillText(`Feito em ${fmtDate(todaySerial())}`, pad, H - 50);
+  return { cv, nome: `Relatorio Carlos ${mes}.png` };
+}
+
+function relatorioSheet() {
+  const { cv, nome } = relatorioCanvas(), url = cv.toDataURL("image/png");
+  openSheet("Relatório do Carlos", `
+    <img class="rel-img" src="${url}" alt="Relatório do Carlos">
+    <div class="stack"><button class="btn big" id="f-share" disabled><svg><use href="#i-share"/></svg>Mandar (WhatsApp…)</button></div>
+    <p class="tip" id="f-dica" hidden>Este aparelho não abre o compartilhar. Toque e segure na imagem e escolha <b>Salvar</b> ou <b>Copiar</b>, depois mande no WhatsApp.</p>`, (el) => {
+    const btn = $("#f-share", el);
+    // o arquivo fica pronto antes do toque: o iPhone só abre o compartilhar direto do toque
+    cv.toBlob(b => {
+      const file = b && new File([b], nome, { type: "image/png" });
+      if (!file || !navigator.canShare || !navigator.canShare({ files: [file] })) { btn.hidden = true; $("#f-dica", el).hidden = false; return; }
+      btn.disabled = false;
+      btn.onclick = () => navigator.share({ files: [file] }).catch(e => { if (e && e.name !== "AbortError") toast("Não deu para abrir o compartilhar.", true); });
+    }, "image/png");
+  });
+}
+
 // Recibo do extra do Carlos: mesmo jeito do recibo de compra, apontando para o Total do Carlos.
 function reciboExtra({ nome, valor, row }) {
-  const total = S.m.carlos.total;
+  const total = relCarlos(S.m).total;
   openSheet("Extra anotado", `
     <div class="recibo">
       <svg class="recibo-ok" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37.5 19"/></svg>
@@ -1687,6 +1769,8 @@ document.addEventListener("click", async e => {
         onSave: (n, v) => run("saveCarlos", { row, antes: x.nome, nome: n, valor: v }),
         onDel: () => run("delCarlos", { row, antes: x.nome }) });
     }
+    case "edit-nubank-rel": return nubankRelSheet();
+    case "mandar-relatorio": return relatorioSheet();
     case "novo-carlos": return valorSheet("Novo valor do Carlos", { nome: "", valor: "", nomeEditavel: true, onSave: (n, v) => run("saveCarlos", { row: null, nome: n, valor: v }) });
     case "edit-porquinho": return porquinhoSheet(m.porquinho.find(p => p.row === row));
     case "novo-porquinho": return porquinhoSheet(null);
