@@ -221,11 +221,16 @@ function parse(g) {
   const rCH = need(find(titulo("O QUE O CARLOS DÁ")), "bloco do Carlos");
   const rNu = need(find(comeca("NUBANK CARLOS"), rCH), "NUBANK CARLOS");
   m.carlos = { mensalRow: rCH + 1, mensal: v(rCH + 1, 3), extras: [], nubank: v(rNu, 3), total: v(rNu + 1, 3), entrou: v(rNu + 2, 3), dif: v(rNu + 3, 3) };
-  // coluna B = "EXTRA": compra extra do mês (lançada pelo app), sai no fechamento; os outros itens são fixos
-  for (let r = rCH + 2; r < rNu; r++) m.carlos.extras.push({ row: r, nome: A(r), valor: v(r, 3), extra: norm(v(r, 2)) === "EXTRA" });
+  // coluna B = "EXTRA": compra extra do mês (lançada pelo app), sai no fechamento; os outros itens são fixos.
+  // Item fixo com prazo: B = último mês (como em B2, ex.: "jan/27"); sai no fechamento desse mês
+  for (let r = rCH + 2; r < rNu; r++) { const b = norm(v(r, 2)), ate = months.find(x => norm(x.label) === b); m.carlos.extras.push({ row: r, nome: A(r), valor: v(r, 3), extra: b === "EXTRA", ate: ate ? ate.label : "", ateIdx: ate ? ate.idx : null }); }
   // valor do Nubank que ela cobra no relatório do Carlos (PAGAMENTOS, TIPO = RELATORIO); vazio = o da fatura
   const relNu = m.pagos.find(x => x.tipo === "RELATORIO" && norm(x.nome) === "NUBANK CARLOS");
   m.carlos.nubankRel = relNu && typeof relNu.valor === "number" ? relNu.valor : null;
+  // itens do relatório só deste mês (PAGAMENTOS, TIPO = CARLOS)
+  m.carlos.doMes = m.pagos.filter(x => x.tipo === "CARLOS");
+  // compras de cartão que o Carlos paga (TIPO = CARLOS COMPRA, F = lista, G = 1ª fatura): entram no relatório de cada mês em que a compra cai
+  m.carlos.compras = (g.pag || []).filter(x => norm(x[1]) === "CARLOS COMPRA").map(x => ({ nome: String(x[2] || ""), lista: String(x[5] || ""), fat: String(x[6] || "").trim() }));
 
   // cartões
   const rCT = need(find(titulo("CARTÕES")), "CARTÕES");
@@ -368,7 +373,7 @@ function verMes(g, label) {
   set(R.rRes + 3, 3, r2(entrou - soma["1º DINHEIRO"][1] - soma["2º DINHEIRO"][1]));
   // Carlos: os extras são do mês da planilha; o Nubank do Carlos é a lista dele neste mês
   let totCarlos = num(m0.carlos.mensal);
-  for (const x of m0.carlos.extras) { if (x.extra) { set(x.row, 1, ""); set(x.row, 2, ""); set(x.row, 3, ""); } else totCarlos += num(x.valor); }
+  for (const x of m0.carlos.extras) { if (x.extra || (x.ateIdx !== null && x.ateIdx < z)) { set(x.row, 1, ""); set(x.row, 2, ""); set(x.row, 3, ""); } else totCarlos += num(x.valor); }
   const lc = m0.listas.find(l => /CARLOS/.test(norm(l.nome))), nu = lc ? totLista.get(lc) : 0;
   totCarlos = r2(totCarlos + nu);
   set(R.rNu, 3, nu); set(R.rNu + 1, 3, totCarlos); set(R.rNu + 2, 3, entrou); set(R.rNu + 3, 3, r2(entrou - totCarlos));
@@ -508,6 +513,25 @@ async function mudaPag(mes, tipo, nome, linha) {
   if (linha) ficam.push([mes, tipo, nome, ...linha]);
   await gravaPag(ficam);
 }
+// lê de novo, tira a 1ª linha que `tira(linha)` aceitar (se `tira` vier) e põe `nova` (se vier). Sem achar o que tirar, avisa.
+async function trocaPag(tira, nova) {
+  const rows = ((await existeAba(PAGTAB)) ? await lerPag() : []).filter(r => r[0] !== undefined && r[0] !== "");
+  if (tira) {
+    const i = rows.findIndex(tira);
+    if (i < 0) throw new Error("Isso mudou na planilha (talvez outra pessoa mexeu). Atualizei a tela, tente de novo.");
+    rows.splice(i, 1);
+  }
+  if (nova) rows.push(nova);
+  await gravaPag(rows);
+}
+// compra de cartão que o Carlos paga: marca em PAGAMENTOS (TIPO = CARLOS COMPRA) pela lista, nome e 1ª fatura
+const chaveCompra = (k, r) => norm(r[1]) === "CARLOS COMPRA" && String(r[5] || "") === k.lista && norm(r[2]) === norm(k.nome) && String(r[6] || "").trim() === k.fat;
+const doCarlos = k => !!(k && S.m && S.m.carlos.compras.some(c => chaveCompra(k, ["", "CARLOS COMPRA", c.nome, "", "", c.lista, c.fat])));
+async function ligaCarlos(antes, depois) {
+  if (antes && depois && antes.lista === depois.lista && norm(antes.nome) === norm(depois.nome) && antes.fat === depois.fat) return;
+  if (!antes && !depois) return;
+  await trocaPag(antes ? r => chaveCompra(antes, r) : null, depois ? [S.m.mes, "CARLOS COMPRA", depois.nome, "", "", depois.lista, depois.fat] : null);
+}
 // nome da conta sem o "(no Carrefour)" do fim: o cartão agora muda todo mês
 const nomeConta = nome => String(nome || "").replace(/\s*\((no [^)]*|m[eê]s anterior)\)\s*$/i, "").trim();
 // Conta do mês anterior (ex.: condomínio): ela recebe no fim do mês e paga atrasado a conta que venceu no mês
@@ -519,7 +543,8 @@ const tituloConta = f => nomeConta(f.nome) + (ehAnterior(f.nome) ? ` de ${mesAnt
 const casaNome = (a, b) => { const x = norm(nomeConta(a)), y = norm(nomeConta(b)); return !!x && !!y && (x.startsWith(y) || y.startsWith(x)); };
 
 const OPS = {
-  async addCompra({ lista, nome, valor, data, parc, fat }) {
+  // carlos: true = o Carlos paga esta compra (entra no relatório dele em cada mês em que ela cai)
+  async addCompra({ lista, nome, valor, data, parc, fat, carlos }) {
     const l = S.m.listas.find(x => x.nome === lista);
     if (!l) throw new Error("Não achei a lista desse cartão na planilha.");
     const fresh = await readRange(`CASA!A${l.first}:B${l.last}`);
@@ -531,16 +556,25 @@ const OPS = {
     if (row < 0) throw new Error("A lista desse cartão está cheia. Use “Fechar o mês” (em Mais) para tirar as compras que já acabaram.");
     await writeRaw([{ range: `CASA!A${row}:E${row}`, values: [[nome, valor, data, parc, fat]] }]);
     OPS.ultimaLinha = row;
+    if (carlos) await ligaCarlos(null, { lista, nome, fat });
     return `Compra salva em ${l.label}.`;
   },
-  async editCompra({ row, antes, nome, valor, data, parc, fat }) {
+  // carlos: true/false muda a marca do Carlos; sem ele, a marca (se tinha) acompanha a compra
+  async editCompra({ row, antes, nome, valor, data, parc, fat, carlos }) {
     await sameRow(row, antes);
     await writeRaw([{ range: `CASA!A${row}:E${row}`, values: [[nome, valor, data, parc, fat]] }]);
+    const l = S.m.listas.find(x => x.itens.some(i => i.row === row)), it = l && l.itens.find(i => i.row === row);
+    if (l) {
+      const velho = { lista: l.nome, nome: antes, fat: it.fat }, tinha = doCarlos(velho), quer = carlos === undefined ? tinha : carlos;
+      await ligaCarlos(tinha ? velho : null, quer ? { lista: l.nome, nome, fat } : null);
+    }
     return "Compra alterada.";
   },
   async delCompra({ row, antes }) {
     await sameRow(row, antes);
     await clearRanges([`CASA!A${row}:E${row}`]);
+    const l = S.m.listas.find(x => x.itens.some(i => i.row === row)), it = l && l.itens.find(i => i.row === row), k = l && { lista: l.nome, nome: antes, fat: it.fat };
+    if (doCarlos(k)) await ligaCarlos(k, null);
     return "Compra apagada.";
   },
   // pago: true = marcar como paga hoje (ou manter a data, se já estava); false = desmarcar; undefined = não mexe
@@ -594,10 +628,11 @@ const OPS = {
     return [`${titleCase(compra)} lançada no ${l ? l.label : lista}, fatura de ${fm ? titleCase(fm.nome).split(" ")[0].toLowerCase() : fat}.`, ...msgs].join(" ");
   },
   // Pix: uma linha por pagamento em PAGAMENTOS (mesmo nome pode repetir no mês)
-  async addPix({ nome, valor, data }) {
+  // carlos: true = o Carlos paga este Pix (F = "CARLOS"): entra no relatório dele deste mês
+  async addPix({ nome, valor, data, carlos }) {
     const rows = (await existeAba(PAGTAB)) ? await lerPag() : [];
-    await gravaPag(rows.filter(r => r[0] !== undefined && r[0] !== "").concat([[S.m.mes, "PIX", nome, data, valor, "", ""]]));
-    return `Pix anotado: ${brl(valor)} saiu do dinheiro disponível.`;
+    await gravaPag(rows.filter(r => r[0] !== undefined && r[0] !== "").concat([[S.m.mes, "PIX", nome, data, valor, carlos ? "CARLOS" : "", ""]]));
+    return `Pix anotado: ${brl(valor)} saiu do dinheiro disponível${carlos ? " e entrou no relatório do Carlos" : ""}.`;
   },
   async delPix({ nome, valor, data }) {
     const rows = ((await existeAba(PAGTAB)) ? await lerPag() : []).filter(r => r[0] !== undefined && r[0] !== "");
@@ -607,9 +642,9 @@ const OPS = {
     await gravaPag(rows);
     return "Pix apagado.";
   },
-  async editPix({ antes, nome, valor, data }) {
+  async editPix({ antes, nome, valor, data, carlos }) {
     await OPS.delPix(antes);
-    await OPS.addPix({ nome, valor, data });
+    await OPS.addPix({ nome, valor, data, carlos });
     return "Pix alterado.";
   },
   async pagaFatura({ nome, valor, data, pago }) {
@@ -628,7 +663,8 @@ const OPS = {
     await writeRaw(data);
     return "Entrada salva.";
   },
-  async saveCarlos({ row, antes, nome, valor, mensal }) {
+  // ate: último mês do item fixo ("" = todo mês; undefined = não mexe na coluna B, que pode ter a marca EXTRA)
+  async saveCarlos({ row, antes, nome, valor, mensal, ate }) {
     if (mensal) { await writeRaw([{ range: `CASA!C${row}`, values: [[valor]] }]); return "Valor salvo."; }
     if (row) await sameRow(row, antes);
     else {
@@ -636,7 +672,7 @@ const OPS = {
       if (!f) throw new Error("Não tem linha vazia no bloco do Carlos.");
       row = f.row;
     }
-    await writeRaw([{ range: `CASA!A${row}`, values: [[nome]] }, { range: `CASA!C${row}`, values: [[valor]] }]);
+    await writeRaw([{ range: `CASA!A${row}`, values: [[nome]] }, { range: `CASA!C${row}`, values: [[valor]] }, ...(ate === undefined ? [] : [{ range: `CASA!B${row}`, values: [[ate]] }])]);
     return "Valor salvo.";
   },
   async delCarlos({ row, antes }) {
@@ -664,6 +700,12 @@ const OPS = {
     await writeRaw([{ range: `CASA!A${row}:C${row}`, values: [["CARLOS", data, valor]] }]);
     OPS.ultimaLinha = row;
     return "Dinheiro do Carlos anotado.";
+  },
+  // item do relatório do Carlos só deste mês (PAGAMENTOS, TIPO = CARLOS); antes = o item que está sendo mudado
+  async saveCarlosMes({ antes, nome, valor }) {
+    const mes = S.m.mes, igual = r => norm(r[0]) === norm(mes) && norm(r[1]) === "CARLOS" && norm(r[2]) === norm(antes.nome) && num(r[4]) === num(antes.valor);
+    await trocaPag(antes ? igual : null, nome ? [mes, "CARLOS", nome, todaySerial(), valor, "", ""] : null);
+    return nome ? "Entrou no relatório do Carlos deste mês." : "Saiu do relatório.";
   },
   // Nubank do relatório do Carlos: só muda o relatório, o cartão continua igual (valor null = volta ao da fatura)
   async saveNubankRel({ valor }) {
@@ -794,9 +836,16 @@ async function fecharMes() {
   await gravaFixMes(guardadas);
   data.push(...valoresDoMes(guardadas, prox.label, fixas));
   // 5) extras do Carlos e dinheiro que ele mandou no meio do mês: eram deste mês, saem
-  for (const x of m.carlos.extras) if (x.extra) data.push({ range: `CASA!A${x.row}:C${x.row}`, values: [["", "", ""]] });
+  //    e os itens fixos do Carlos com prazo que acabou neste mês
+  for (const x of m.carlos.extras) if (x.extra || (x.ateIdx !== null && x.ateIdx <= m.cur.idx)) data.push({ range: `CASA!A${x.row}:C${x.row}`, values: [["", "", ""]] });
   for (const e of m.entradas) if (e.carlos) data.push({ range: `CASA!A${e.row}:C${e.row}`, values: [["", "", ""]] });
   await writeRaw(data);
+  // 6) marcas do Carlos de compras que acabaram (não ficaram em nenhuma lista) saem de PAGAMENTOS
+  const ficou = c => m.listas.some(l => l.nome === c.lista && l.itens.some(it => norm(it.nome) === norm(c.nome) && it.fat === c.fat && !(it.fat !== "" && num(it.fim) <= m.cur.idx)));
+  if (m.carlos.compras.some(c => !ficou(c))) {
+    const rows = (await lerPag()).filter(r => r[0] !== undefined && r[0] !== "");
+    await gravaPag(rows.filter(r => norm(r[1]) !== "CARLOS COMPRA" || ficou({ nome: String(r[2] || ""), lista: String(r[5] || ""), fat: String(r[6] || "").trim() })));
+  }
   return `${titleCase(m.cur.nome)} foi guardado em ANTERIORES. Agora é ${titleCase(prox.nome)}.`;
 }
 
@@ -1197,17 +1246,33 @@ function viewContas() {
 
 // Relatório do Carlos: o que ela cobra dele no mês. O Nubank pode ter outro valor que o da fatura
 // (ela cobra mais ou menos); isso muda só o relatório, não o cartão nem as contas dela.
+// Também entram (só no relatório) os itens só deste mês, as compras de cartão e os Pix marcados "o Carlos paga".
 function relCarlos(m) {
   const c = m.carlos, mudou = c.nubankRel !== null, nubank = mudou ? c.nubankRel : num(c.nubank);
-  const total = Math.round((num(c.total) - num(c.nubank) + nubank) * 100) / 100;
-  const itens = [["MENSAL", num(c.mensal)], ...c.extras.filter(x => x.nome || x.valor !== "").map(x => [x.nome, num(x.valor)]), ["NUBANK DO CARLOS", nubank]];
-  return { mudou, nubank, total, dif: Math.round((num(c.entrou) - total) * 100) / 100, itens };
+  const mais = [
+    ...c.doMes.map((x, i) => ({ tipo: "mes", i, nome: x.nome, valor: num(x.valor) })),
+    ...c.compras.flatMap(k => {
+      const l = m.listas.find(y => y.nome === k.lista), it = l && l.itens.find(y => norm(y.nome) === norm(k.nome) && y.fat === k.fat);
+      return it && num(it.noMes) > 0 ? [{ tipo: "compra", l, it, nome: /^P \d/.test(it.sit) ? `${it.nome} (${it.sit.slice(2)})` : it.nome, valor: num(it.noMes) }] : [];
+    }),
+    ...m.pix.filter(p => norm(p.lista) === "CARLOS").map(p => ({ tipo: "pix", p, nome: p.nome, valor: num(p.valor) })),
+  ];
+  const total = Math.round((num(c.total) - num(c.nubank) + nubank + mais.reduce((a, x) => a + x.valor, 0)) * 100) / 100;
+  const itens = [["MENSAL", num(c.mensal)], ...c.extras.filter(x => x.nome || x.valor !== "").map(x => [x.nome, num(x.valor)]), ...mais.map(x => [x.nome, x.valor]), ["NUBANK DO CARLOS", nubank]];
+  return { mudou, nubank, total, dif: Math.round((num(c.entrou) - total) * 100) / 100, itens, mais };
 }
+// "até janeiro/27" do item fixo com prazo, olhando do mês da tela
+function ateTxt(x) {
+  if (x.ateIdx === null) return "";
+  const falta = x.ateIdx - (S.m.cur ? S.m.cur.idx : x.ateIdx), mo = monthByIdx(x.ateIdx);
+  return falta <= 0 ? "último mês" : `até ${mo ? esc(mesAno(mo)) : esc(x.ate)} · falta${falta > 1 ? "m" : ""} ${falta} ${falta > 1 ? "meses" : "mês"}`;
+}
+const mesAno = mo => { const [a, b] = titleCase(mo.nome).split(" "); return `${a.toLowerCase()}/${String(b || "").slice(-2)}`; };
 
 function viewMais() {
   const m = S.m, c = m.carlos;
   const ex = c.extras.filter(x => x.nome || x.valor !== "").map(x => `<button class="item" data-act="edit-carlos" data-row="${x.row}">
-      ${icoBubble(x.nome)}<span class="item-main"><span class="item-t">${esc(x.nome)}</span>${x.extra ? `<span class="item-s"><span class="tag tag-extra">EXTRA DO MÊS</span></span>` : ""}</span><span class="item-v">${brl(x.valor)}</span></button>`).join("");
+      ${icoBubble(x.nome)}<span class="item-main"><span class="item-t">${esc(x.nome)}</span>${x.extra ? `<span class="item-s"><span class="tag tag-extra">EXTRA DO MÊS</span></span>` : x.ateIdx !== null ? `<span class="item-s">${ateTxt(x)}</span>` : ""}</span><span class="item-v">${brl(x.valor)}</span></button>`).join("");
   const envios = m.entradas.filter(e => e.carlos).map(envioHtml).join("");
   const pqRows = m.porquinho.filter(p => p.data !== "" || p.inter !== "" || p.mp !== "");
   const ult = pqRows[pqRows.length - 1];
@@ -1217,15 +1282,23 @@ function viewMais() {
       <span class="item-v">${brl(p.total)}${p.dif !== "" ? `<small class="${num(p.dif) < 0 ? "neg" : "pos"}">${num(p.dif) >= 0 ? "▲ " : "▼ "}${brl(Math.abs(num(p.dif)))}</small>` : ""}</span></button>`).join("");
   const email = store.get("email"), rel = relCarlos(m);
   const difOk = Math.abs(rel.dif) < 0.01;
+  // itens que estão só no relatório: deste mês, compra no cartão ou Pix que o Carlos paga
+  const mais = rel.mais.map(x => {
+    const act = x.tipo === "mes" ? `data-act="edit-carlos-mes" data-i="${x.i}"` : x.tipo === "pix" ? `data-act="edit-pix" data-i="${m.pix.indexOf(x.p)}"` : `data-act="edit-compra" data-row="${x.it.row}"`;
+    const ico = x.tipo === "compra" ? miniCard(x.l.card) : x.tipo === "pix" ? `<span class="ico" style="--ic:#12b886"><svg><use href="#i-pix"/></svg></span>` : icoBubble(x.nome);
+    const sub = x.tipo === "mes" ? `<span class="tag tag-extra">SÓ ESTE MÊS</span>` : x.tipo === "pix" ? `Pix${typeof x.p.data === "number" ? ` · dia ${esc(fmtDate(x.p.data, "short"))}` : ""}` : `${esc(x.l.label)} · ${esc(x.it.sit === "FIXO" ? "todo mês" : x.it.sit.toLowerCase())}`;
+    return `<button class="item" ${act}>${ico}<span class="item-main"><span class="item-t">${esc(x.nome)}</span><span class="item-s">${sub}</span></span><span class="item-v">${brl(x.valor)}</span></button>`;
+  }).join("");
   return `${secHead("Relatório Carlos", esc(m.cur ? titleCase(m.cur.nome) : m.mes), "#2f9e44")}
     <div class="carlos"><span>Total do Carlos</span><b>${brl(rel.total)}</b>
       <small class="${difOk ? "pos" : "neg"}">${difOk ? "bate com o que entrou" : `diferença de ${brl(rel.dif)} para o que entrou (${brl(c.entrou)})`}</small></div>
     <div class="list">
       <button class="item" data-act="edit-carlos-mensal"><span class="ico" style="--ic:#2f9e44"><svg><use href="#i-in"/></svg></span><span class="item-main"><span class="item-t">Mensal</span></span><span class="item-v">${brl(c.mensal)}</span></button>
-      ${ex}
+      ${ex}${mais}
       <button class="item" data-act="edit-nubank-rel">${miniCard("NUBANK")}<span class="item-main"><span class="item-t">Nubank do Carlos</span><span class="item-s">${rel.mudou ? `no cartão: ${brl(c.nubank)} · mudou só aqui` : "vem do cartão · toque para mudar"}</span></span><span class="item-v">${brl(rel.nubank)}</span></button>
     </div>
     <button class="btn" data-act="mandar-relatorio"><svg><use href="#i-share"/></svg>Mandar o relatório</button>
+    <button class="btn ghost" data-act="novo-carlos-mes"><svg><use href="#i-plus"/></svg>Item só deste mês</button>
     <button class="btn ghost" data-act="novo-carlos"><svg><use href="#i-plus"/></svg>Novo item fixo do Carlos</button>
     ${envios ? `<p class="sub-lista">Dinheiro que o Carlos mandou neste mês</p><div class="list">${envios}</div>` : ""}
     <button class="btn ghost" data-act="novo-envio-carlos"><svg><use href="#i-plus"/></svg>O Carlos mandou dinheiro</button>
@@ -1386,6 +1459,7 @@ function compraSheet({ cardNome, item }) {
   const pick = listas.map(l => { const b = brand(l.card); return `<button type="button" data-lista="${esc(l.nome)}" class="${lista && lista.nome === l.nome ? "on" : ""}" aria-pressed="${!!(lista && lista.nome === l.nome)}" style="background:${b.bg};color:${b.fg};--sh:${b.sh}">${esc(l.label)}</button>`; }).join("")
     + (item ? "" : `<button type="button" class="pick-extra pick-pix" data-lista="__pix" aria-pressed="false">Pix<small>sai do dinheiro</small></button><button type="button" class="pick-extra" data-lista="__extra" aria-pressed="false">Extra do Carlos<small>não é cartão</small></button>`);
   let pix = false; // pago no Pix: sai do dinheiro disponível na hora
+  let carlos = item && lista ? doCarlos({ lista: lista.nome, nome: item.nome, fat: item.fat }) : false; // o Carlos paga: entra no relatório dele
   const body = `
     <div class="field"><span id="g-cartao">${item ? "Cartão" : "Como pagou"}</span><div class="cardpick" role="group" aria-labelledby="g-cartao">${pick}</div></div>
     <p class="tip" id="f-pix-tip" hidden>Pago no Pix: sai do <b>dinheiro disponível</b> na hora. Fica em Contas → “Pagos no Pix”.</p>
@@ -1399,6 +1473,7 @@ function compraSheet({ cardNome, item }) {
     <label class="field"><span id="lbl-valor">Valor</span><input class="input money" id="f-valor" inputmode="decimal" autocomplete="off" placeholder="ex.: 49,90" value="${esc(item ? moneyInput(item.valor) : "")}">
       <small id="f-total"></small></label>
     <label class="field" id="f-data-box"><span id="lbl-data">Data da compra</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(dataSerial))}"></label>
+    <div class="field" id="f-carlos-box">${marcaCarlosHtml(carlos)}</div>
     <div class="so-cartao">
     <div class="field"><span id="g-fat">Entra na fatura de</span>
       <div class="tip" id="f-best"></div>
@@ -1416,6 +1491,12 @@ function compraSheet({ cardNome, item }) {
       $("#lbl-valor", el).textContent = extra || pix ? "Valor" : tipo === "parc" ? "Valor de CADA parcela" : tipo === "fixo" ? "Valor por mês" : "Valor";
       $$(".so-cartao", el).forEach(x => x.hidden = extra || pix); $("#f-extra-tip", el).hidden = !extra; $("#f-pix-tip", el).hidden = !pix;
       $("#f-data-box", el).hidden = extra; $("#lbl-data", el).textContent = pix ? "Dia que pagou" : "Data da compra";
+      // o Nubank do Carlos já vai inteiro no relatório; o extra do Carlos também
+      $("#f-carlos-box", el).hidden = !(pix || (lista && !/CARLOS/.test(norm(lista.nome))));
+      const fm = monthByLabel(fat);
+      $("#f-carlos-s", el).textContent = pix ? "Entra no relatório do Carlos deste mês"
+        : tipo === "parc" ? "Cada parcela entra no relatório do mês da fatura dela" : tipo === "fixo" ? "Entra no relatório do Carlos todo mês"
+        : `Entra no relatório do Carlos${fm ? ` de ${titleCase(fm.nome).split(" ")[0].toLowerCase()} (mês da fatura)` : ""}`;
       const v = parseMoney($("#f-valor", el).value);
       $("#f-total", el).textContent = !extra && tipo === "parc" && v ? `Total da compra: ${brl(v * nParc)} (${nParc}× ${brl(v)})` : "";
       const c = cardOf(), auto = monthByLabel(autoFat());
@@ -1437,6 +1518,7 @@ function compraSheet({ cardNome, item }) {
       upd();
     });
     bindChoices(el, "tipo", t => { tipo = t; upd(); });
+    $("#f-carlos", el).onclick = e => { carlos = !carlos; e.currentTarget.setAttribute("aria-pressed", String(carlos)); };
     $$("[data-step]", el).forEach(b => b.onclick = () => { nParc = Math.min(48, Math.max(2, nParc + Number(b.dataset.step))); upd(); });
     $("#f-valor", el).oninput = upd;
     $("#f-data", el).onchange = e => { const s = isoToSerial(e.target.value); if (s) { dataSerial = s; if (!fatManual) fat = autoFat(); upd(); } };
@@ -1449,14 +1531,14 @@ function compraSheet({ cardNome, item }) {
       if (!lista && !extra && !pix) return formErr(el, ".cardpick button", "Escolha o cartão, o Pix ou o “Extra do Carlos”.");
       if (!nome) return formErr(el, "#f-nome", "Escreva o que comprou.");
       if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 49,90.");
-      if (pix) return salvarDaFolha(el, close, () => run("addPix", { nome, valor, data: dataSerial }));
+      if (pix) return salvarDaFolha(el, close, () => run("addPix", { nome, valor, data: dataSerial, carlos }));
       if (extra) {
         if (await salvarDaFolha(el, close, () => run("addExtraCarlos", { nome, valor }, { quieto: true }))) reciboExtra({ nome, valor, row: OPS.ultimaLinha });
         return;
       }
       if (!fat) return formErr(el, "#f-fat-opts button, #f-fat-sel", "Escolha em qual fatura entra.");
       const parc = tipo === "fixo" ? "FIXO" : tipo === "parc" ? nParc : "";
-      const args = { lista: lista.nome, nome, valor, data: dataSerial, parc, fat };
+      const args = { lista: lista.nome, nome, valor, data: dataSerial, parc, fat, carlos: carlos && !/CARLOS/.test(norm(lista.nome)) };
       const q = { quieto: true }; // o recibo substitui o aviso
       if (item && lista.itens.some(i => i.row === item.row)) {
         const antes = { nome: item.nome, valor: item.valor, data: item.data, parc: item.parc, fat: item.fat };
@@ -1500,7 +1582,7 @@ function reciboCompra({ args, row, antes, trocou }) {
       <p class="recibo-lead">${DEMO ? "Anotada (modo de teste)." : "Está na planilha."}</p>
       <div class="recibo-linha">
         ${miniCard(l.card)}
-        <div class="recibo-main"><b>${esc(args.nome)}</b><span>${esc(l.label)} · ${quando}</span></div>
+        <div class="recibo-main"><b>${esc(args.nome)}</b><span>${esc(l.label)} · ${quando}${args.carlos ? " · no relatório do Carlos" : ""}</span></div>
         <div class="recibo-v">${valor}</div>
       </div>
     </div>
@@ -1537,6 +1619,76 @@ function nubankRelSheet() {
     setTimeout(() => $("#f-valor", el).focus(), 300);
   });
 }
+
+// Item do relatório só deste mês (não mexe nas contas dela nem na planilha CASA)
+function carlosMesSheet(x) {
+  const mes = S.m.cur ? titleCase(S.m.cur.nome).split(" ")[0].toLowerCase() : S.m.mes;
+  openSheet(x ? "Item deste mês" : "Item só deste mês", `
+    <p class="tip">Entra só no <b>relatório do Carlos de ${esc(mes)}</b>. Não muda as suas contas, e no mês seguinte não aparece mais.</p>
+    <label class="field"><span>Nome</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(x ? x.nome : "")}" placeholder="ex.: FARMÁCIA"></label>
+    <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(x ? moneyInput(x.valor) : "")}"></label>
+    <div class="stack"><button class="btn" id="f-ok">Salvar</button>${x ? `<button class="btn danger" id="f-del">Tirar do relatório</button>` : ""}</div>`, (el, close) => {
+    const antes = x && { nome: x.nome, valor: x.valor };
+    $("#f-ok", el).onclick = () => {
+      const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value);
+      if (!nome) return formErr(el, "#f-nome", "Escreva o nome.");
+      if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 120,00.");
+      salvarDaFolha(el, close, () => run("saveCarlosMes", { antes, nome, valor }));
+    };
+    if (x) $("#f-del", el).onclick = async () => {
+      close();
+      if (await confirmSheet("Tirar do relatório?", `<b>${esc(x.nome)}</b> – ${brl(x.valor)}`, "Tirar", true)) run("saveCarlosMes", { antes, nome: "", valor: "" });
+    };
+    setTimeout(() => $(x ? "#f-valor" : "#f-nome", el).focus(), 300);
+  });
+}
+
+// Item fixo do Carlos (Netflix, INSS…): vale todo mês ou só por alguns meses (o último mês fica na coluna B).
+// O extra do mês (B = EXTRA) usa a mesma folha, sem o prazo.
+function carlosItemSheet(x) {
+  const cur = S.m.cur ? S.m.cur.idx : 0, extra = !!(x && x.extra);
+  let dur = x && x.ateIdx !== null ? "meses" : "sempre";
+  let n = x && x.ateIdx !== null ? Math.max(1, x.ateIdx - cur + 1) : 3;
+  const ateMes = () => monthByIdx(cur + n - 1);
+  openSheet(x ? (extra ? "Extra do Carlos" : "Item fixo do Carlos") : "Novo item fixo do Carlos", `
+    <label class="field"><span>Nome</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(x ? x.nome : "")}" placeholder="ex.: NETFLIX"></label>
+    <label class="field"><span>Valor por mês</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 120,00" value="${esc(x ? moneyInput(x.valor) : "")}"></label>
+    ${extra ? "" : `<div class="field"><span id="g-dur">Por quanto tempo</span><div class="choices duas" role="group" aria-labelledby="g-dur">${choiceBtns("dur", [["sempre", "Todo mês"], ["meses", "Alguns meses"]], dur)}</div></div>
+    <div class="field" id="dur-box"><span>Quantos meses${x ? ", contando este" : ""}</span>
+      <div class="stepper"><button type="button" data-step="-1" aria-label="Menos um mês">−</button><div class="num" id="f-n"></div><button type="button" data-step="1" aria-label="Mais um mês">+</button></div>
+      <small id="f-ate"></small></div>`}
+    <div class="stack"><button class="btn" id="f-ok">Salvar</button>${x ? `<button class="btn danger" id="f-del">Apagar</button>` : ""}</div>`, (el, close) => {
+    const upd = () => {
+      if (extra) return;
+      $("#dur-box", el).hidden = dur !== "meses";
+      $("#f-n", el).textContent = n;
+      const mo = ateMes();
+      $("#f-ate", el).innerHTML = mo ? `${n === 1 ? "Só este mês" : `De ${esc(titleCase(S.m.cur.nome).split(" ")[0].toLowerCase())} até <b>${esc(titleCase(mo.nome).toLowerCase())}</b>`}. Depois sai sozinho do relatório.` : "Acabaram os meses na tabela da planilha.";
+    };
+    if (!extra) {
+      bindChoices(el, "dur", d => { dur = d; upd(); });
+      $$("[data-step]", el).forEach(b => b.onclick = () => { n = Math.min(60, Math.max(1, n + Number(b.dataset.step))); upd(); });
+      upd();
+    }
+    $("#f-ok", el).onclick = () => {
+      const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value);
+      if (!nome) return formErr(el, "#f-nome", "Escreva o nome.");
+      if (valor === null) return formErr(el, "#f-valor", "Digite o valor, por exemplo 120,00.");
+      let ate;
+      if (!extra) {
+        const mo = dur === "meses" ? ateMes() : null;
+        if (dur === "meses" && !mo) return formErr(el, "[data-step]", "Acabaram os meses na tabela da planilha. Escolha menos meses.");
+        ate = mo ? mo.label : "";
+      }
+      salvarDaFolha(el, close, () => run("saveCarlos", { row: x ? x.row : null, antes: x ? x.nome : undefined, nome, valor, ate }));
+    };
+    if (x) $("#f-del", el).onclick = async () => { close(); if (await confirmSheet("Apagar?", `<b>${esc(x.nome)}</b>`, "Apagar", true)) run("delCarlos", { row: x.row, antes: x.nome }); };
+    if (!x) setTimeout(() => $("#f-nome", el).focus(), 300);
+  });
+}
+
+// "O Carlos paga": marca na compra (cartão) ou no Pix para entrar no relatório dele
+const marcaCarlosHtml = on => `<button type="button" class="marca-carlos" id="f-carlos" aria-pressed="${!!on}"><span class="caixa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>O Carlos paga<small id="f-carlos-s">Entra no relatório do Carlos</small></span></button>`;
 
 // Desenha o relatório do Carlos numa imagem (canvas, sem biblioteca) para mandar no WhatsApp.
 function relatorioCanvas() {
@@ -1618,13 +1770,17 @@ function pixSheet(p) {
     <label class="field"><span>O que pagou</span><input class="input" id="f-nome" autocapitalize="characters" value="${esc(p ? p.nome : "")}" placeholder="ex.: FEIRA"></label>
     <label class="field"><span>Valor</span><input class="input money" id="f-valor" inputmode="decimal" placeholder="ex.: 50,00" value="${esc(p ? moneyInput(p.valor) : "")}"></label>
     <label class="field"><span>Dia que pagou</span><input class="input" type="date" id="f-data" value="${esc(serialToIso(p && typeof p.data === "number" ? p.data : todaySerial()))}"></label>
+    <div class="field">${marcaCarlosHtml(p && norm(p.lista) === "CARLOS")}</div>
     <div class="stack"><button class="btn" id="f-ok">Salvar</button>${p ? `<button class="btn danger" id="f-del">Apagar este Pix</button>` : ""}</div>`, (el, close) => {
+    let carlos = !!(p && norm(p.lista) === "CARLOS");
+    $("#f-carlos-s", el).textContent = "Entra no relatório do Carlos deste mês";
+    $("#f-carlos", el).onclick = e => { carlos = !carlos; e.currentTarget.setAttribute("aria-pressed", String(carlos)); };
     $("#f-ok", el).onclick = () => {
       const nome = $("#f-nome", el).value.trim().toUpperCase(), valor = parseMoney($("#f-valor", el).value), data = isoToSerial($("#f-data", el).value) ?? todaySerial();
       if (!nome) return formErr(el, "#f-nome", "Escreva o que pagou.");
       if (!valor || valor <= 0) return formErr(el, "#f-valor", "Digite o valor, por exemplo 50,00.");
       const antes = p && { nome: p.nome, valor: p.valor, data: p.data };
-      salvarDaFolha(el, close, () => run(p ? "editPix" : "addPix", p ? { antes, nome, valor, data } : { nome, valor, data }));
+      salvarDaFolha(el, close, () => run(p ? "editPix" : "addPix", p ? { antes, nome, valor, data, carlos } : { nome, valor, data, carlos }));
     };
     if (p) $("#f-del", el).onclick = async () => {
       close();
@@ -1893,15 +2049,12 @@ document.addEventListener("click", async e => {
       return;
     }
     case "edit-carlos-mensal": return valorSheet("Mensal do Carlos", { nome: "MENSAL", valor: m.carlos.mensal, onSave: (n, v) => run("saveCarlos", { row: m.carlos.mensalRow, valor: v, mensal: true }) });
-    case "edit-carlos": {
-      const x = m.carlos.extras.find(i => i.row === row);
-      return valorSheet("Valor do Carlos", { nome: x.nome, valor: x.valor, nomeEditavel: true,
-        onSave: (n, v) => run("saveCarlos", { row, antes: x.nome, nome: n, valor: v }),
-        onDel: () => run("delCarlos", { row, antes: x.nome }) });
-    }
+    case "edit-carlos": return carlosItemSheet(m.carlos.extras.find(i => i.row === row));
+    case "novo-carlos-mes": return carlosMesSheet(null);
+    case "edit-carlos-mes": { const x = m.carlos.doMes[Number(t.dataset.i)]; return x ? carlosMesSheet(x) : null; }
     case "edit-nubank-rel": return nubankRelSheet();
     case "mandar-relatorio": return relatorioSheet();
-    case "novo-carlos": return valorSheet("Novo valor do Carlos", { nome: "", valor: "", nomeEditavel: true, onSave: (n, v) => run("saveCarlos", { row: null, nome: n, valor: v }) });
+    case "novo-carlos": return carlosItemSheet(null);
     case "edit-porquinho": return porquinhoSheet(m.porquinho.find(p => p.row === row));
     case "novo-porquinho": return porquinhoSheet(null);
     case "novo-envio-carlos": return envioCarlosSheet(null);

@@ -556,3 +556,14 @@ details.dados[open] > summary::after { content: "▴"; }
 .cardpick .pick-pix { box-shadow: inset 0 0 0 2px #12b886; }
 .rel-img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line, rgba(0,0,0,.1)); margin-bottom: 14px; }
 .top.vendo .top-label { opacity: 1; color: #ffd43b; } /* outro mês, só neste celular */
+
+/* "O Carlos paga": marca na compra e no Pix (entra no relatório do Carlos) */
+.choices.duas { grid-template-columns: repeat(2, 1fr); }
+.marca-carlos { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px; border-radius: 16px; border: 2px solid var(--line); background: var(--field); color: var(--ink); text-align: left; font-weight: 800; font-size: 1rem; line-height: 1.2; }
+.marca-carlos small { display: block; margin-top: 3px; font-size: .8rem; font-weight: 700; color: var(--ink-3); }
+.marca-carlos .caixa { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; border: 2px solid var(--ring); background: var(--surface); }
+.marca-carlos .caixa svg { width: 20px; height: 20px; fill: none; stroke: var(--surface); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+.marca-carlos[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-2); }
+.marca-carlos[aria-pressed="true"] small { color: var(--brand); }
+.marca-carlos[aria-pressed="true"] .caixa { border-color: var(--brand); background: var(--brand); }
+.marca-carlos[aria-pressed="true"] .caixa svg { opacity: 1; }
